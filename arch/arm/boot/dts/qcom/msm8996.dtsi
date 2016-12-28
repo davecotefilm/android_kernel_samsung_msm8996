@@ -21,7 +21,7 @@
 	interrupt-parent = <&intc>;
 
 	chosen {
-		bootargs = "boot_cpus=0,1,2,3 sched_enable_hmp=1 sched_enable_power_aware=1";
+		bootargs = "sched_enable_hmp=1 sched_enable_power_aware=1";
 	};
 
 	aliases {
@@ -515,8 +515,6 @@
 		qcom,src-dst-ports = <1 512>;
 		qcom,active-only;
 		qcom,bw-tbl =
-			<   762 /* 100 MHz */ >,
-			<  1144 /* 150 MHz */ >,
 			<  1525 /* 200 MHz */ >,
 			<  2288 /* 300 MHz */ >,
 			<  3509 /* 460 MHz */ >,
@@ -535,8 +533,6 @@
 		qcom,src-dst-ports = <1 512>;
 		qcom,active-only;
 		qcom,bw-tbl =
-			<   762 /* 100 MHz */ >,
-			<  1144 /* 150 MHz */ >,
 			<  1525 /* 200 MHz */ >,
 			<  2288 /* 300 MHz */ >,
 			<  3509 /* 460 MHz */ >,
@@ -739,8 +735,9 @@
 
 	clock_mmss: qcom,mmsscc@8c0000 {
 		compatible = "qcom,mmsscc-8996";
-		reg = <0x8c0000 0xb00c>;
-		reg-names = "cc_base";
+		reg = <0x8c0000 0xb00c>,
+			<0x74130 0x8>;
+		reg-names = "cc_base", "efuse";
 		vdd_dig-supply = <&pm8994_s1_corner>;
 		mmpll4_dig-supply = <&pm8994_s1_corner>;
 		mmpll4_analog-supply = <&pm8994_l12>;
@@ -764,9 +761,8 @@
 
 	clock_gpu: qcom,gpucc@8c0000 {
 		compatible = "qcom,gpucc-8996";
-		reg = <0x8c0000 0xb00c>,
-			<0x74130 0x8>;
-		reg-names = "cc_base", "efuse";
+		reg = <0x8c0000 0xb00c>;
+		reg-names = "cc_base";
 		vdd_gfx-supply = <&gfx_vreg>;
 		qcom,gfx3d_clk_src-opp-handle = <&msm_gpu>;
 		vdd_mx-supply = <&pm8994_s2_corner>;
@@ -878,6 +874,14 @@
 			&tsif1_sync_active>;		/* dual-tsif-mode2 */
 	};
 
+	wcd_rst_gpio: wcd_gpio_ctrl {
+		compatible = "qcom,wcd-gpio-ctrl";
+		qcom,cdc-rst-n-gpio = <&tlmm 64 0>;
+		pinctrl-names = "aud_active", "aud_sleep";
+		pinctrl-0 = <&cdc_reset_active>;
+		pinctrl-1 = <&cdc_reset_sleep>;
+	};
+
 	slim_msm: slim@91c0000 {
 		cell-index = <1>;
 		compatible = "qcom,slim-ngd";
@@ -903,7 +907,7 @@
 				      17 18 19 20 21 22 23 24 25 26 27 28 29
 				      30>;
 
-			qcom,cdc-reset-gpio = <&tlmm 64 0>;
+			qcom,wcd-rst-gpio-node = <&wcd_rst_gpio>;
 
 			clock-names = "wcd_clk", "wcd_native_clk";
 			clocks = <&clock_audio clk_audio_pmi_clk>,
@@ -2305,6 +2309,7 @@
 		qcom,ahb-clk-vote;
 		qcom,pnoc-clk-vote;
 		qcom,qdsp6v56-1-5;
+		qcom,mx-spike-wa;
 		memory-region = <&modem_mem>;
 		qcom,mem-protect-id = <0xF>;
 
@@ -3158,7 +3163,12 @@
 
 	qcom,msm_fastrpc {
 		compatible = "qcom,msm-fastrpc-adsp";
-
+		qcom,msm_fastrpc_cpz_cb1 {
+			compatible = "qcom,msm-fastrpc-compute-cb";
+			label = "adsprpc-smd";
+			iommus = <&lpass_q6_smmu 2>;
+			qcom,secure-context-bank;
+		};
 		qcom,msm_fastrpc_compute_cb1 {
 			compatible = "qcom,msm-fastrpc-compute-cb";
 			label = "adsprpc-smd";
@@ -3438,6 +3448,12 @@
 		clock-names = "dcc_clk";
 
 		qcom,save-reg;
+	};
+
+	qcom,msm-power {
+		compatible = "qcom,msm-power";
+		clock-names = "gpu_clk";
+		clocks = <&clock_gpu clk_gpu_gx_gfx3d_clk>;
 	};
 };
 

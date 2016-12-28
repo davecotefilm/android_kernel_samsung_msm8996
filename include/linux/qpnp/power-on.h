@@ -37,14 +37,17 @@ enum pon_trigger_source {
 
 /**
  * enum pon_power_off_type: Possible power off actions to perform
- * %PON_POWER_OFF_WARM_RESET:	Reset the MSM but not all PMIC peripherals
- * %PON_POWER_OFF_SHUTDOWN:	Shutdown the MSM and PMIC completely
- * %PON_POWER_OFF_HARD_RESET:	Reset the MSM and all PMIC peripherals
+ * %PON_POWER_OFF_RESERVED:          Reserved, not used
+ * %PON_POWER_OFF_WARM_RESET:        Reset the MSM but not all PMIC peripherals
+ * %PON_POWER_OFF_SHUTDOWN:          Shutdown the MSM and PMIC completely
+ * %PON_POWER_OFF_HARD_RESET:        Reset the MSM and all PMIC peripherals
  */
 enum pon_power_off_type {
+	PON_POWER_OFF_RESERVED		= 0x00,
 	PON_POWER_OFF_WARM_RESET	= 0x01,
 	PON_POWER_OFF_SHUTDOWN		= 0x04,
 	PON_POWER_OFF_HARD_RESET	= 0x07,
+	PON_POWER_OFF_MAX_TYPE		= 0x10,
 };
 
 enum pon_restart_reason {
@@ -65,6 +68,11 @@ enum pon_restart_reason {
 #ifdef CONFIG_SEC_PERIPHERAL_SECURE_CHK	
 	PON_RESTART_REASON_SECURE_CHECK_FAIL = 0x1A,
 #endif
+	PON_RESTART_REASON_WATCH_DOG    = 0x1B,
+	PON_RESTART_REASON_KERNEL_PANIC = 0x1C,
+	PON_RESTART_REASON_THERMAL      = 0x1D,
+	PON_RESTART_REASON_POWER_RESET  = 0x1E,
+	PON_RESTART_REASON_WTSR		= 0x1F,
 /***********************************************/
 	PON_RESTART_REASON_RORY_START	= 0x20,
    /* here is reserved for rory download. */
@@ -72,6 +80,9 @@ enum pon_restart_reason {
    /*   & PON_RESTART_REASON_RORY_END */
 	PON_RESTART_REASON_RORY_END	= 0x2A,
 /***********************************************/
+#ifdef CONFIG_SEC_ENGINEER_MODE_CONTROL
+	PON_RESTART_REASON_EM_FORCE_USER = 0x2B,
+#endif
 	PON_RESTART_REASON_DBG_LOW	= 0x30,
 	PON_RESTART_REASON_DBG_MID	= 0x31,
 	PON_RESTART_REASON_DBG_HIGH	= 0x32,

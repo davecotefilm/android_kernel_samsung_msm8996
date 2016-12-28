@@ -171,7 +171,12 @@ obj-$(CONFIG_ESOC)		+= esoc/
 obj-$(CONFIG_SAMSUNG_NFC)		+= nfc/
 
 obj-$(CONFIG_BIF)		+= bif/
-obj-$(CONFIG_BATTERY_SAMSUNG)   += battery/
+
+ifeq ($(CONFIG_BATTERY_SAMSUNG_V2), y)
+	obj-$(CONFIG_BATTERY_SAMSUNG)	+= battery_v2/
+else
+	obj-$(CONFIG_BATTERY_SAMSUNG)	+= battery/
+endif
 
 obj-$(CONFIG_SENSORS_SSC)	+= sensors/
 

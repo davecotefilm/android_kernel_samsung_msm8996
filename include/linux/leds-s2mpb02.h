@@ -39,6 +39,11 @@
 #define S2MPB02_FLED_MODE_SHIFT 6
 
 #define S2MPB02_FLED_ENABLE_MODE_MASK 0xC0
+#define S2MPB02_FLED2_MAX_TIME_MASK 0x1F
+#define S2MPB02_FLED2_MAX_TIME_CLEAR_MASK 0x04
+#define S2MPB02_FLED2_MAX_TIME_EN_MASK 0x01
+#define S2MPB02_FLED2_IRON2_MASK 0xC0
+
 
 enum s2mpb02_led_id {
 	S2MPB02_FLASH_LED_1,
@@ -139,5 +144,12 @@ struct s2mpb02_led_platform_data {
 };
 
 extern int s2mpb02_led_en(int mode, int onoff);
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+extern int s2mpb02_ir_led_init(void);
+extern int s2mpb02_ir_led_current(int32_t current_value);
+extern int s2mpb02_ir_led_pulse_width(int32_t width);
+extern int s2mpb02_ir_led_pulse_delay(int32_t delay);
+extern int s2mpb02_ir_led_max_time(int32_t max_time);
+#endif
 
 #endif

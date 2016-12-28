@@ -46,6 +46,9 @@ static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 
 		host->trigger_card_event = true;
 
+		if (host->card_detect_cnt < 0x7FFFFFFF)
+			host->card_detect_cnt++;
+
 		if (!status)
 			mmc_detect_change(host, 0);
 		else

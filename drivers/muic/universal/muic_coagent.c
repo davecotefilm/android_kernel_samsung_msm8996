@@ -40,7 +40,7 @@ void coagent_update_ctx(muic_data_t *pmuic)
 	pco->pmuic = pmuic;
 }
 
-static int coagent_cmd_gamepad(struct coagent *pco, int status)
+static int coagent_cmd_usbconnection(struct coagent *pco, int status)
 {
 	pr_info("%s: status=[%s]\n", __func__,
 		(status == COA_STATUS_OK) ? "OK" : "NOK");
@@ -56,8 +56,9 @@ static int coagent_cmd_gamepad(struct coagent *pco, int status)
 	}
 
 	if ((pco->pmuic->attached_dev != ATTACHED_DEV_GAMEPAD_MUIC) &&
-		(pco->pmuic->attached_dev != ATTACHED_DEV_OTG_MUIC)) {
-		pr_info("%s: Abnormal state for USB's gampad Noti. [%d]\n",
+		(pco->pmuic->attached_dev != ATTACHED_DEV_OTG_MUIC) &&
+		(pco->pmuic->attached_dev != ATTACHED_DEV_USB_LANHUB_MUIC)) {
+		pr_info("%s: Abnormal state for USB's Noti. [%d]\n",
 			__func__, pco->pmuic->attached_dev);
 		return -1;
 	}
@@ -67,7 +68,7 @@ static int coagent_cmd_gamepad(struct coagent *pco, int status)
 			/* The interrupts occurred during mode change will be discarded. */
 			pco->pmuic->discard_interrupt = true;
 			set_adc_scan_mode(pco->pmuic, ADC_SCANMODE_CONTINUOUS);
-			msleep(200);
+			msleep(50);
 			pco->pmuic->discard_interrupt = false;
 		}
 	} else 
@@ -80,8 +81,8 @@ static int coagent_cmd_handler(struct coagent *pco, int cmd, int param)
 {
 
 	switch (cmd) {
-	case COA_GAMEPAD_STATUS:
-		coagent_cmd_gamepad(pco, param);
+	case COA_USB_STATUS:
+		coagent_cmd_usbconnection(pco, param);
 		break;
 	default:
 		break;

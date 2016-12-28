@@ -312,6 +312,12 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				hard_reset_reason);
 #endif
+#ifdef CONFIG_SEC_ENGINEER_MODE_CONTROL
+		} else if (!strncmp(cmd, "em_mode_force_user", 18)) {
+			hard_reset_reason = PON_RESTART_REASON_EM_FORCE_USER;
+			qpnp_pon_set_restart_reason(
+				hard_reset_reason);
+#endif			
 		} else if (!strncmp(cmd, "oem-", 4)) {
 #ifdef CONFIG_SEC_BSP
 			hard_reset_reason = PON_RESTART_REASON_UNKNOWN;
@@ -394,28 +400,27 @@ static void msm_restart_prepare(const char *cmd)
 				hard_reset_reason);
 		} else if (strlen(cmd) == 0) {
 			printk(KERN_NOTICE "%s : value of cmd is NULL.\n", __func__);
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_NORMALBOOT);
+			hard_reset_reason = PON_RESTART_REASON_NORMALBOOT;
+			qpnp_pon_set_restart_reason(hard_reset_reason);
 #endif
 #ifdef CONFIG_MUIC_SUPPORT_RUSTPROOF
 		} else if (!strncmp(cmd, "swsel", 5) /* set switch value */
 					&& !kstrtoul(cmd + 5, 0, &value)) {
 			value = (((value & 0x8) >> 1) | value) & 0x7;
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_SWITCHSEL | value);
+			hard_reset_reason = PON_RESTART_REASON_SWITCHSEL | value;
+			qpnp_pon_set_restart_reason(hard_reset_reason);
 #endif
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
 		} else if (!strncmp(cmd, "fwup", 4)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_FIRMWAREUPDATE);
-			
+			hard_reset_reason = PON_RESTART_REASON_FIRMWAREUPDATE;
+			qpnp_pon_set_restart_reason(hard_reset_reason);
 		} else if (!strncmp(cmd, "GlobalActions restart", 21)){ 
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_NORMALBOOT);
+			hard_reset_reason = PON_RESTART_REASON_NORMALBOOT;
+			qpnp_pon_set_restart_reason(hard_reset_reason);
 		} else {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_UNKNOWN);
+			hard_reset_reason = PON_RESTART_REASON_UNKNOWN;
+			qpnp_pon_set_restart_reason(hard_reset_reason);
 		}
 #ifdef CONFIG_SEC_DEBUG
 		printk(KERN_NOTICE "%s : restart_reason = 0x%x(0x%x)\n",

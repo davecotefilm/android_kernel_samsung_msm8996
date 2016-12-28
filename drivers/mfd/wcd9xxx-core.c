@@ -23,13 +23,13 @@
 #include <linux/mfd/wcd9xxx/core-resource.h>
 #include <linux/mfd/wcd9xxx/pdata.h>
 #include <linux/mfd/wcd9xxx/wcd9xxx_registers.h>
+#include <linux/mfd/wcd9xxx/wcd-gpio-ctrl.h>
 #include <linux/mfd/wcd9335/registers.h>
 
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/debugfs.h>
 #include <linux/regulator/consumer.h>
-#include <linux/regulator/rpm-smd-regulator.h> 
 #include <linux/i2c.h>
 #include <linux/regmap.h>
 #include <sound/soc.h>
@@ -1033,7 +1033,8 @@ static int wcd9335_bring_up(struct wcd9xxx *wcd9xxx)
 				   WCD9335_CHIP_TIER_CTRL_CHIP_ID_BYTE0);
 
 	if ((val < 0) || (byte0 < 0)) {
-		pr_err("%s: wcd9335 version detection fail!\n", __func__);
+		dev_err(wcd9xxx->dev, "%s: tasha codec version detection fail!\n",
+			__func__);
 		return -EINVAL;
 	}
 
@@ -1074,6 +1075,8 @@ static int wcd9335_bring_up(struct wcd9xxx *wcd9xxx)
 				    WCD9335_CODEC_RPM_PWR_CDC_DIG_HM_CTL, 0x3);
 		__wcd9xxx_reg_write(wcd9xxx, WCD9335_CODEC_RPM_RST_CTL, 0x3);
 	} else {
+		dev_err(wcd9xxx->dev, "%s: tasha codec version unknown\n",
+			__func__);
 		ret = -EINVAL;
 	}
 
@@ -1089,7 +1092,7 @@ static void wcd9335_bring_down(struct wcd9xxx *wcd9xxx)
 static int wcd9xxx_bring_up(struct wcd9xxx *wcd9xxx)
 {
 	int ret = 0;
-	
+
 	pr_debug("%s: Codec Type: %d\n", __func__, wcd9xxx->type);
 
 	if (wcd9xxx->type == WCD9335) {
@@ -1137,6 +1140,28 @@ static int wcd9xxx_reset(struct wcd9xxx *wcd9xxx)
 	int value;
 	struct wcd9xxx_pdata *pdata = wcd9xxx->dev->platform_data;
 
+	if (wcd9xxx->wcd_rst_np) {
+		/* use pinctrl and call into wcd-rst-gpio driver */
+		ret = wcd_gpio_ctrl_select_sleep_state(wcd9xxx->wcd_rst_np);
+		if (ret) {
+			pr_err("%s: wcd sleep pinctrl state fail!\n",
+					__func__);
+			return ret;
+		}
+		/* 20ms sleep required after pulling the reset gpio to LOW */
+		msleep(20);
+		ret = wcd_gpio_ctrl_select_active_state(wcd9xxx->wcd_rst_np);
+		if (ret) {
+			pr_err("%s: wcd active pinctrl state fail!\n",
+					__func__);
+			return ret;
+		}
+		/* 20ms sleep required after pulling the reset gpio to HIGH */
+		msleep(20);
+
+		return 0;
+	}
+
 	pr_info("%s : use pinctrl %s", __func__, pdata->use_pinctrl ? "true" : "false");
 
 	if (wcd9xxx->reset_gpio && wcd9xxx->slim_device_bootup
@@ -1183,6 +1208,12 @@ static int wcd9xxx_reset(struct wcd9xxx *wcd9xxx)
 static void wcd9xxx_free_reset(struct wcd9xxx *wcd9xxx)
 {
 	struct wcd9xxx_pdata *pdata = wcd9xxx->dev->platform_data;
+
+	if (wcd9xxx->wcd_rst_np) {
+		wcd_gpio_ctrl_select_sleep_state(wcd9xxx->wcd_rst_np);
+		return;
+	}
+
 	if (wcd9xxx->reset_gpio) {
 		if (!pdata->use_pinctrl) {
 			gpio_free(wcd9xxx->reset_gpio);
@@ -1514,7 +1545,7 @@ static int wcd9xxx_device_init(struct wcd9xxx *wcd9xxx)
 	mutex_init(&wcd9xxx->xfer_lock);
 
 	dev_set_drvdata(wcd9xxx->dev, wcd9xxx);
-	ret = wcd9xxx_bring_up(wcd9xxx);\
+	ret = wcd9xxx_bring_up(wcd9xxx);
 	if (ret) {
 		ret = -EPROBE_DEFER;
 		goto err_bring_up;
@@ -1715,6 +1746,15 @@ static void wcd9xxx_set_reset_pin_state(struct wcd9xxx *wcd9xxx,
 					struct wcd9xxx_pdata *pdata,
 					bool active)
 {
+	if (wcd9xxx->wcd_rst_np) {
+		if (active)
+			wcd_gpio_ctrl_select_active_state(wcd9xxx->wcd_rst_np);
+		else
+			wcd_gpio_ctrl_select_sleep_state(wcd9xxx->wcd_rst_np);
+
+		return;
+	}
+
 	if (pdata->use_pinctrl) {
 		if (active == true)
 			pinctrl_select_state(pinctrl_info.pinctrl,
@@ -1853,11 +1893,6 @@ static int wcd9xxx_init_supplies(struct wcd9xxx *wcd9xxx,
 		goto err_supplies;
 	}
 
-	wcd9xxx->s4_mode_regulator =
-		rpm_regulator_get(wcd9xxx->dev, "cdc-s4-mode");
-	if (IS_ERR(wcd9xxx->s4_mode_regulator))
-		dev_info(wcd9xxx->dev, "s4 auto power mode\n");
-
 	for (i = 0; i < wcd9xxx->num_of_supplies; i++) {
 		if (regulator_count_voltages(wcd9xxx->supplies[i].consumer) <=
 		    0)
@@ -1957,8 +1992,6 @@ static void wcd9xxx_release_supplies(struct wcd9xxx *wcd9xxx,
 		regulator_set_optimum_mode(wcd9xxx->supplies[i].consumer, 0);
 	}
 	regulator_bulk_free(wcd9xxx->num_of_supplies, wcd9xxx->supplies);
-	if (!IS_ERR(wcd9xxx->s4_mode_regulator))
-		rpm_regulator_put(wcd9xxx->s4_mode_regulator); 
 	kfree(wcd9xxx->supplies);
 }
 
@@ -2557,6 +2590,17 @@ static struct wcd9xxx_pdata *wcd9xxx_populate_dt_pdata(struct device *dev)
 	const char *ond_prop_name = "qcom,cdc-on-demand-supplies";
 	const char *cp_supplies_name = "qcom,cdc-cp-supplies";
 	const char *cdc_name;
+	struct of_phandle_args imp_list;
+	int i = 0;
+	struct wcd9xxx_gain_table default_table[MAX_IMPEDANCE_TALBE] = {
+		{    0,      13, 0},
+		{   14,      42, 4},
+		{   43,     100, 5},
+		{  101,     200, 7},
+		{  201,     450, 8},
+		{  451,    1000, 8},
+		{ 1001, INT_MAX, 5},
+	};
 
 	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
 	if (!pdata) {
@@ -2610,15 +2654,19 @@ static struct wcd9xxx_pdata *wcd9xxx_populate_dt_pdata(struct device *dev)
 	if (ret)
 		goto err;
 
-	pdata->reset_gpio = of_get_named_gpio(dev->of_node,
+	pdata->wcd_rst_np = of_parse_phandle(dev->of_node,
+					     "qcom,wcd-rst-gpio-node", 0);
+	if (!pdata->wcd_rst_np) {
+		pdata->reset_gpio = of_get_named_gpio(dev->of_node,
 				"qcom,cdc-reset-gpio", 0);
-	if (pdata->reset_gpio < 0) {
-		dev_err(dev, "Looking up %s property in node %s failed %d\n",
-			"qcom, cdc-reset-gpio", dev->of_node->full_name,
-			pdata->reset_gpio);
-		goto err;
+		if (pdata->reset_gpio < 0) {
+			dev_err(dev, "Looking up %s property in node %s failed %d\n",
+				"qcom, cdc-reset-gpio",
+				dev->of_node->full_name, pdata->reset_gpio);
+			goto err;
+		}
+		dev_dbg(dev, "%s: reset gpio %d", __func__, pdata->reset_gpio);
 	}
-	dev_dbg(dev, "%s: reset gpio %d", __func__, pdata->reset_gpio);
 	ret = of_property_read_u32(dev->of_node,
 				   "qcom,cdc-mclk-clk-rate",
 				   &mclk_rate);
@@ -2685,6 +2733,24 @@ static struct wcd9xxx_pdata *wcd9xxx_populate_dt_pdata(struct device *dev)
 			pdata->cdc_variant = WCD9330;
 		else
 			pdata->cdc_variant = WCD9XXX;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(pdata->imp_table); i++) {
+		ret = of_parse_phandle_with_args(dev->of_node,
+			"imp-table", "#list-imp-cells", i, &imp_list);
+		if (ret < 0) {
+			pdata->imp_table[i].min = default_table[i].min;
+			pdata->imp_table[i].max = default_table[i].max;
+			pdata->imp_table[i].gain= default_table[i].gain;
+		} else {
+			pdata->imp_table[i].min = imp_list.args[0];
+			pdata->imp_table[i].max = imp_list.args[1];
+			pdata->imp_table[i].gain= imp_list.args[2];
+		}
+		dev_dbg(dev, "impedance gain table %d, %d, %d\n",
+			pdata->imp_table[i].min,
+			pdata->imp_table[i].max,
+			pdata->imp_table[i].gain);
 	}
 
 	return pdata;
@@ -2847,12 +2913,17 @@ static int wcd9xxx_slim_probe(struct slim_device *slim)
 	wcd9xxx->dev = &slim->dev;
 	wcd9xxx->mclk_rate = pdata->mclk_rate;
 	wcd9xxx->slim_device_bootup = true;
+	wcd9xxx->wcd_rst_np = pdata->wcd_rst_np;
 
-	ret = extcodec_get_pinctrl(&slim->dev);
-	if (ret < 0)
-		pdata->use_pinctrl = false;
-	else
+	if (!wcd9xxx->wcd_rst_np) {
+		ret = extcodec_get_pinctrl(&slim->dev);
+		if (ret < 0)
+			pdata->use_pinctrl = false;
+		else
+			pdata->use_pinctrl = true;
+	} else {
 		pdata->use_pinctrl = true;
+	}
 
 	ret = wcd9xxx_init_supplies(wcd9xxx, pdata);
 	if (ret) {
@@ -2919,7 +2990,7 @@ static int wcd9xxx_slim_probe(struct slim_device *slim)
 	ret = wcd9xxx_device_init(wcd9xxx);
 	if (ret) {
 		pr_err("%s: error, initializing device failed (%d)\n",
-				__func__, ret);
+			__func__, ret);
 		goto err_slim_add;
 	}
 #ifdef CONFIG_DEBUG_FS

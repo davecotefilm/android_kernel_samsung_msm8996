@@ -17,786 +17,629 @@
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include "wacom_i2c.h"
+#include "wacom.h"
+#include "wacom_i2c_func.h"
+#include "wacom_i2c_firm.h"
 #include "wacom_i2c_flash.h"
 
-static int wacom_enter_flash_mode(struct wacom_i2c *wac_i2c)
+#define ERR_HEX 0x056
+#define RETRY_TRANSFER 5
+unsigned char checksum_data[4];
+
+int calc_checksum(unsigned char *flash_data)
 {
-	int ret, len = 0;
-	char buf[8];
+	unsigned long i;
 
-	dev_info(&wac_i2c->client->dev, "%s\n", __func__);
+	if (ums_binary)
+		return 0;
 
-	memset(buf, 0, 8);
-	strncpy(buf, "\rflash\r", 7);
+	for (i = 0; i < 4; i++)
+		checksum_data[i] = 0;
 
-	len = sizeof(buf) / sizeof(buf[0]);
-
-	ret = wac_i2c->wacom_i2c_send(wac_i2c, buf, len, WACOM_I2C_MODE_BOOT);
-	if (ret < 0) {
-		dev_err(&wac_i2c->client->dev,
-				"%s: Sending flash command failed, %d\n",
-				__func__, ret);
-		return ret;
+	for (i = 0x0000; i < 0xC000; i += 4) {
+		checksum_data[0] ^= flash_data[i];
+		checksum_data[1] ^= flash_data[i+1];
+		checksum_data[2] ^= flash_data[i+2];
+		checksum_data[3] ^= flash_data[i+3];
 	}
 
-	msleep(300);
+	pr_info("%s %s : %02x, %02x, %02x, %02x\n",
+		SECLOG, __func__, checksum_data[0], checksum_data[1],
+		checksum_data[2], checksum_data[3]);
+
+	for (i = 0; i < 4; i++) {
+		if (checksum_data[i] != fw_chksum[i+1])
+			return -ERR_HEX;
+	}
 
 	return 0;
 }
 
-static int wacom_set_cmd_feature(struct wacom_i2c *wac_i2c)
+int wacom_i2c_flash_chksum(struct wacom_i2c *wac_i2c, unsigned char *flash_data,
+			   unsigned long *max_address)
 {
-	int ret, len = 0;
-	u8 buf[4];
+	unsigned long i;
+	unsigned long chksum = 0;
 
-	usleep_range(60, 61);
+	for (i = 0x0000; i <= *max_address; i++)
+		chksum += flash_data[i];
 
-	buf[len++] = 4;
-	buf[len++] = 0;
-	buf[len++] = 0x37;
-	buf[len++] = CMD_SET_FEATURE;
+	chksum &= 0xFFFF;
 
-	ret = wac_i2c->wacom_i2c_send(wac_i2c, buf, len, WACOM_I2C_MODE_BOOT);
-	if (ret < 0)
-		dev_err(&wac_i2c->client->dev,
-				"%s: failed send CMD_SET_FEATURE, %d\n",
-				__func__, ret);
-
-	usleep_range(60, 61);
-
-	return ret;
+	return (int)chksum;
 }
 
-static int wacom_get_cmd_feature(struct wacom_i2c *wac_i2c)
+int wacom_i2c_flash_cmd(struct wacom_i2c *wac_i2c)
 {
-	int ret, len = 0;
-	u8 buf[6];
+	int ret, len, i;
+	u8 buf[10], flashq;
 
-	usleep_range(60, 61);
+	buf[0] = 0x0d;
+	buf[1] = FLASH_START0;
+	buf[2] = FLASH_START1;
+	buf[3] = FLASH_START2;
+	buf[4] = FLASH_START3;
+	buf[5] = FLASH_START4;
+	buf[6] = FLASH_START5;
+	buf[7] = 0x0d;
+	flashq = 0xE0;
+	len = 1;
 
-	buf[len++] = 4;
-	buf[len++] = 0;
-	buf[len++] = 0x38;
-	buf[len++] = CMD_GET_FEATURE;
-	buf[len++] = 5;
-	buf[len++] = 0;
+	ret = wacom_i2c_send(wac_i2c, &flashq, len, true);
+	if (ret >= 0) {
+		i = 0;
+		do {
+			msleep(1);
+			ret = wacom_i2c_recv(wac_i2c,
+						&flashq, len, true);
+			i++;
 
-	ret = wac_i2c->wacom_i2c_send(wac_i2c, buf, len, WACOM_I2C_MODE_BOOT);
-	if (ret < 0)
-		dev_err(&wac_i2c->client->dev,
-				"%s: failed send CMD_GET_FEATURE, ret: %d\n",
-				__func__, ret);
-
-	usleep_range(60, 61);
-
-	return ret;
-}
-
-/*
- * mode1. BOOT_QUERY: check enter boot mode for flash.
- * mode2. BOOT_BLVER : check bootloader version.
- * mode3. BOOT_MPU : check MPU version
- */
-int wacom_check_flash_mode(struct wacom_i2c *wac_i2c, int mode)
-{
-	int ret, ECH;
-	unsigned char response_cmd = 0;
-	unsigned char command[CMD_SIZE];
-	unsigned char response[RSP_SIZE];
-
-	switch (mode) {
-	case BOOT_QUERY:
-		response_cmd = QUERY_CMD;
-		break;
-	case BOOT_BLVER:
-		response_cmd = BOOT_CMD;
-		break;
-	case BOOT_MPU:
-		response_cmd = MPU_CMD;
-		break;
-	default:
-		break;
+			if (i > RETRY)
+				return -1;
+		} while (flashq == 0xff);
+	} else {
+		msleep(1);
+		len = 8;
+		ret = wacom_i2c_send(wac_i2c, buf, len, false);
+		if (ret < 0) {
+			input_err(true, &wac_i2c->client->dev, "Sending flash command failed\n");
+			return -1;
+		}
+		input_info(true, &wac_i2c->client->dev, "flash send?:%d\n", ret);
+		msleep(270);
 	}
 
-	dev_info(&wac_i2c->client->dev, "%s, mode = %s\n", __func__,
-			(mode == BOOT_QUERY) ? "BOOT_QUERY" :
-			(mode == BOOT_BLVER) ? "BOOT_BLVER" :
-			(mode == BOOT_MPU) ? "BOOT_MPU" : "Not Support");
+	return 0;
+}
 
-	ret = wacom_set_cmd_feature(wac_i2c);
-	if (ret < 0)
-		return ret;
+int wacom_i2c_flash_query(struct wacom_i2c *wac_i2c, u8 query, u8 recvdQuery)
+{
+	int ret, len, i;
+	u8 flashq;
 
-	command[0] = 5;
-	command[1] = 0;
-	command[2] = 5;
-	command[3] = 0;
-	command[4] = BOOT_CMD_REPORT_ID;
-	command[5] = mode;
-	command[6] = ECH = 7;
+	flashq = query;
+	len = 1;
 
-	ret = wac_i2c->wacom_i2c_send(wac_i2c, command, 7, WACOM_I2C_MODE_BOOT);
+	ret = wacom_i2c_send(wac_i2c, &flashq, len, true);
 	if (ret < 0) {
-		dev_err(&wac_i2c->client->dev,
-				"%s: failed send REPORT_ID, %d\n",
-				__func__, ret);
-		return ret;
+		input_err(true, &wac_i2c->client->dev, "query unsent:%d\n", ret);
+		return -1;
 	}
 
-	ret = wacom_get_cmd_feature(wac_i2c);
-	if (ret < 0)
-		return ret;
+	/*sleep*/
+	msleep(10);
+	i = 0;
+	do {
+		msleep(1);
+		flashq = query;
+		ret = wacom_i2c_recv(wac_i2c,
+						&flashq, len, true);
+		i++;
 
-	ret = wac_i2c->wacom_i2c_recv(wac_i2c, response, BOOT_RSP_SIZE,
-			    WACOM_I2C_MODE_BOOT);
-	if (ret < 0) {
-		dev_err(&wac_i2c->client->dev,
-				"%s: failed receive response, %d\n",
-				__func__, ret);
-		return ret;
-	}
+		if (i > RETRY)
+			return -1;
+		input_info(true, &wac_i2c->client->dev, "ret:%d flashq:%x\n", ret, flashq);
+	} while (recvdQuery == 0xff && flashq != recvdQuery);
+	input_info(true, &wac_i2c->client->dev, "query:%x\n", flashq);
 
-	if ((response[3] != response_cmd) || (response[4] != ECH)) {
-		dev_err(&wac_i2c->client->dev,
-				"%s: failed matching response3[%x], 4[%x]\n",
-				__func__, response[3], response[4]);
-		return -EIO;
-	}
-
-	return response[5];
-
+	return flashq;
 }
 
-int wacom_enter_bootloader(struct wacom_i2c *wac_i2c)
+int wacom_i2c_flash_end(struct wacom_i2c *wac_i2c)
 {
 	int ret;
-	int retry = 0;
 
-	dev_info(&wac_i2c->client->dev, "%s\n", __func__);
-
-	ret = wacom_enter_flash_mode(wac_i2c);
-	if (ret < 0)
-		msleep(500);
-
+	/* 2012/07/04 Evaluation for 0x80 and 0xA0 added by Wacom*/
 	do {
-		msleep(100);
-		ret = wacom_check_flash_mode(wac_i2c, BOOT_QUERY);
-		if (ret == QUERY_RSP)
-			dev_info(&wac_i2c->client->dev, "%s: enter flash mode\n", __func__);
-		else
-			dev_err(&wac_i2c->client->dev, "%s: retry BOOT_QUERY\n", __func__);
+		ret = wacom_i2c_flash_query(wac_i2c, FLASH_END, FLASH_END);
+		if (ret == -1)
+			return ERR_FAILED_EXIT;
+	} while (ret == 0xA0 || ret != 0x80);
+	/* 2012/07/04 Evaluation for 0x80 and 0xA0 added by Wacom*/
 
-		retry++;
-	} while (ret < 0 && retry < 10);
+	/*2012/07/05
+	below added for giving firmware enough time to change to user mode*/
+	msleep(1000);
 
-	if (ret < 0)
-		return -EXIT_FAIL_GET_BOOT_LOADER_VERSION;
+	input_info(true, &wac_i2c->client->dev, "Digitizer activated\n");
+	wac_i2c->boot_mode = false;
 
-	ret = wacom_check_flash_mode(wac_i2c, BOOT_MPU);
-	wac_i2c->boot_ver = ret;
-	if (ret < 0)
-		return -EXIT_FAIL_GET_BOOT_LOADER_VERSION;
+	return 0;
+}
 
-	dev_info(&wac_i2c->client->dev, "%s: MPU:%X\n", __func__, wac_i2c->boot_ver);
+int wacom_i2c_flash_enter(struct wacom_i2c *wac_i2c)
+{
+	if (wacom_i2c_flash_query(wac_i2c, FLASH_QUERY, FLASH_ACK) == -1)
+		return ERR_NOT_FLASH;
+
+	wac_i2c->boot_mode = true;
+
+	return 0;
+}
+
+int wacom_i2c_flash_BLVer(struct wacom_i2c *wac_i2c)
+{
+	int ret = 0;
+	ret = wacom_i2c_flash_query(wac_i2c, FLASH_BLVER, 0x40);
+	if (ret == -1)
+		return ERR_UNSENT;
 
 	return ret;
 }
 
-static int wacom_flash_end(struct wacom_i2c *wac_i2c)
+int wacom_i2c_flash_mcuId(struct wacom_i2c *wac_i2c)
 {
-	int ret, ECH;
-	unsigned char command[CMD_SIZE];
+	int ret = 0;
 
-	dev_info(&wac_i2c->client->dev, "%s\n", __func__);
+	ret = wacom_i2c_flash_query(wac_i2c, FLASH_MPU, 0x26);
+	if (ret == -1)
+		return ERR_UNSENT;
 
-	command[0] = 4;
-	command[1] = 0;
-	command[2] = 0x37;
-	command[3] = CMD_SET_FEATURE;
-	command[4] = 5;
-	command[5] = 0;
-	command[6] = 5;
-	command[7] = 0;
-	command[8] = BOOT_CMD_REPORT_ID;
-	command[9] = BOOT_EXIT;
-/*	command[10] = ECH = 7;*/
-	command[10] = ECH = 0;
-
-	ret = wac_i2c->wacom_i2c_send(wac_i2c, command, 11, WACOM_I2C_MODE_BOOT);
-	if (ret < 0)
-		dev_err(&wac_i2c->client->dev,
-				"%s failed, %d\n",
-				__func__, ret);
 	return ret;
 }
 
-static bool erase_datamem(struct wacom_i2c *wac_i2c)
+int wacom_i2c_flash_erase(struct wacom_i2c *wac_i2c, u8 cmd_erase,
+			  u8 cmd_block, u8 endBlock)
 {
-	u8 command[CMD_SIZE];
-	u8 response[BOOT_RSP_SIZE];
-	unsigned char sum = 0;
-	unsigned char cmd_chksum;
-	int ret, ECH, j;
-	int len = 0;
+	struct i2c_client *client = wac_i2c->client;
+	int len, ret, i, j;
+	u8 buf[3], sum, block, flashq;
+	unsigned long swtich_slot_time;
 
-	dev_info(&wac_i2c->client->dev, "%s\n", __func__);
+	ret = 0;
 
-	command[len++] = 4;			/* Command Register-LSB */
-	command[len++] = 0;			/* Command Register-MSB */
-	command[len++] = 0x37;			/* Command-LSB, ReportType:Feature(11) ReportID:7 */
-	command[len++] = CMD_SET_FEATURE;	/* Command-MSB, SET_REPORT */
-	command[len++] = 5;			/* Data Register-LSB */
-	command[len++] = 0;			/* Data-Register-MSB */
-	command[len++] = 0x07;			/* Length Field-LSB */
-	command[len++] = 0;			/* Length Field-MSB */
-	command[len++] = BOOT_CMD_REPORT_ID;    /* Report:ReportID */
-	command[len++] = BOOT_ERASE_DATAMEM;	/* Report:erase datamem command */
-	command[len++] = ECH = BOOT_ERASE_DATAMEM;	/* Report:echo */
-	command[len++] = DATAMEM_SECTOR0;		/* Report:erased block No. */
+	for (i = cmd_block; i >= endBlock; i--) {
+		block = i;
+		block |= 0x80;
 
-	sum = 0;
-	for (j = 4; j < 12; j++)
-		sum += command[j];
-	cmd_chksum = ~sum + 1;					/* Report:check sum */
-	command[len++] = cmd_chksum;
+		sum = cmd_erase;
+		sum += block;
+		sum = ~sum + 1;
 
-	udelay(50);
+		buf[0] = cmd_erase;
+		buf[1] = block;
+		buf[2] = sum;
 
-	ret = wac_i2c->wacom_i2c_send(wac_i2c, command, len, WACOM_I2C_MODE_BOOT);
-	if (ret < 0) {
-		dev_err(&wac_i2c->client->dev, "%s: failing 1: %d \n", __func__, ret);
-		return false;
-	}
-
-	udelay(50);
-
-	do {
-		len = 0;
-		command[len++] = 4;
-		command[len++] = 0;
-		command[len++] = 0x38;
-		command[len++] = CMD_GET_FEATURE;
-		command[len++] = 5;
-		command[len++] = 0;
-
-		ret = wac_i2c->wacom_i2c_send(wac_i2c, command, len, WACOM_I2C_MODE_BOOT);
+		len = 3;
+		ret = wacom_i2c_send(wac_i2c, buf, len, true);
 		if (ret < 0) {
-			dev_err(&wac_i2c->client->dev, "%s: failing 2:%d \n", __func__, ret);
-			return false;
+			input_err(true, &client->dev, "Erase failed\n");
+			return -1;
 		}
 
-		udelay(50);
-
-		ret = wac_i2c->wacom_i2c_recv(wac_i2c, response, BOOT_RSP_SIZE, WACOM_I2C_MODE_BOOT);
-		if (ret < 0) {
-			dev_err(&wac_i2c->client->dev, "%s: failing 3:%d \n", __func__, ret);
-			return false;
-		}
-
-		if ((response[3] != 0x0e || response[4] != ECH) || (response[5] != 0xff && response[5] != 0x00))
-			return false;
-
-		udelay(50);
-
-	} while (response[3] == 0x0e && response[4] == ECH && response[5] == 0xff);
-
-	msleep(50);
-
-	return true;
-}
-
-static bool erase_codemem(struct wacom_i2c *wac_i2c, int *eraseBlock, int num)
-{
-	u8 command[CMD_SIZE];
-	u8 response[BOOT_RSP_SIZE];
-	unsigned char sum = 0;
-	unsigned char cmd_chksum;
-	int ret, ECH;
-	int len = 0;
-	int i, j;
-
-	dev_info(&wac_i2c->client->dev,
-		"%s: total erase code-block number = %d\n", __func__, num);
-
-	for (i = 0; i < num; i++) {
-		len = 0;
-
-		command[len++] = 4;			/* Command Register-LSB */
-		command[len++] = 0;			/* Command Register-MSB */
-		command[len++] = 0x37;			/* Command-LSB, ReportType:Feature(11) ReportID:7 */
-		command[len++] = CMD_SET_FEATURE;	/* Command-MSB, SET_REPORT */
-		command[len++] = 5;			/* Data Register-LSB */
-		command[len++] = 0;			/* Data-Register-MSB */
-		command[len++] = 7;			/* Length Field-LSB */
-		command[len++] = 0;			/* Length Field-MSB */
-		command[len++] = BOOT_CMD_REPORT_ID;	/* Report:ReportID */
-		command[len++] = BOOT_ERASE_FLASH;	/* Report:erase command */
-		command[len++] = ECH = i;		/* Report:echo */
-		command[len++] = *eraseBlock;		/* Report:erased block No. */
-		eraseBlock++;
-
-		sum = 0;
-		for (j = 4; j < 12; j++)
-			sum += command[j];
-		cmd_chksum = ~sum + 1;			/* Report:check sum */
-		command[len++] = cmd_chksum;
-
-		udelay(50);
-
-		ret = wac_i2c->wacom_i2c_send(wac_i2c, command, len, WACOM_I2C_MODE_BOOT);
-		if (ret < 0) {
-			dev_err(&wac_i2c->client->dev, "%s: failing 1:%d \n", __func__, i);
-			return false;
-		}
-
-		udelay(50);
+		len = 1;
+		flashq = 0;
+		j = 0;
 
 		do {
-			len = 0;
-			command[len++] = 4;
-			command[len++] = 0;
-			command[len++] = 0x38;
-			command[len++] = CMD_GET_FEATURE;
-			command[len++] = 5;
-			command[len++] = 0;
+			/*sleep */
+			msleep(100);
+			ret = wacom_i2c_recv(wac_i2c,
+						&flashq, len, true);
+			j++;
 
-			ret = wac_i2c->wacom_i2c_send(wac_i2c, command, len, WACOM_I2C_MODE_BOOT);
-			if (ret < 0) {
-				dev_err(&wac_i2c->client->dev, "%s: failing 2:%d \n", __func__, i);
-				return false;
+			if (j > RETRY || flashq == 0x84 || flashq == 0x88
+			    || flashq == 0x8A || flashq == 0x90) {
+				/*
+				   0xff:No data
+				   0x84:Erase failure
+				   0x88:Erase time parameter error
+				   0x8A:Write time parameter error
+				   0x90:Checksum error
+				 */
+				input_err(true, &client->dev, "Error:%x\n", flashq);
+				return -1;
 			}
 
-			udelay(50);
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
+		} while (flashq == 0xff || flashq != 0x06);
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
 
-			ret = wac_i2c->wacom_i2c_recv(wac_i2c, response, BOOT_RSP_SIZE,
-				    WACOM_I2C_MODE_BOOT);
-			if (ret < 0) {
-				printk("%s failing 3:%d \n", __func__, i);
-				return false;
-			}
-
-			if ((response[3] != 0x00 || response[4] != ECH) || (response[5] != 0xff && response[5] != 0x00))
-				return false;
-
-			udelay(50);
-
-		} while (response[3] == 0x00 && response[4] == ECH && response[5] == 0xff);
-
-		udelay(50);
-
+		if (printk_timed_ratelimit(&swtich_slot_time, 5000))
+			input_info(true, &client->dev, "Erasing at %d, ", i);
+		/*sleep */
+		msleep(1);
 	}
-
-	msleep(50);
-
-	return true;
+	input_info(true, &client->dev, "Erasing done\n");
+	return ret;
 }
 
-static bool flash_erase_w9012(struct wacom_i2c *wac_i2c, int *eraseBlock, int num)
+int wacom_i2c_flash_write(struct wacom_i2c *wac_i2c, unsigned long startAddr,
+			  u8 size, unsigned long maxAddr)
 {
-	bool ret;
+	struct i2c_client *client = wac_i2c->client;
+	unsigned long ulAddr;
+	int ret, len, i, j, k;
+	char sum;
+	u8 buf[WRITE_BUFF], bank;
+	unsigned long swtich_slot_time;
 
-	ret = erase_datamem(wac_i2c);
-	if (!ret) {
-		dev_err(&wac_i2c->client->dev, "%s: erasing datamem failed\n",
-				__func__);
-		return false;
-	}
+	ret = len = i = 0;
+	bank = BANK;
 
-	ret = erase_codemem(wac_i2c, eraseBlock, num);
-	if (!ret) {
-		dev_err(&wac_i2c->client->dev, "%s: erasing codemem failed\n",
-				__func__);
-		return false;
-	}
-
-	return true;
-}
-
-static bool flash_write_block_w9012(struct wacom_i2c *wac_i2c, char *flash_data,
-				    unsigned long ulAddress, u8 *pcommand_id, int *ECH)
-{
-	const int MAX_COM_SIZE = (16 + FLASH_BLOCK_SIZE + 2);
-	/* 16: num of command[0] to command[15]
-	** FLASH_BLOCK_SIZE: unit to erase the block
-	** Num of Last 2 checksums
-	*/
-
-	u8 command[300];
-	unsigned char sum = 0;
-	int ret, i;
-
-	command[0] = 4;		/* Command Register-LSB */
-	command[1] = 0;		/* Command Register-MSB */
-	command[2] = 0x37;	/* Command-LSB, ReportType:Feature(11) ReportID:7 */
-	command[3] = CMD_SET_FEATURE;	/* Command-MSB, SET_REPORT */
-	command[4] = 5;			/* Data Register-LSB */
-	command[5] = 0;			/* Data-Register-MSB */
-	command[6] = 76;		/* Length Field-LSB */
-	command[7] = 0;			/* Length Field-MSB */
-	command[8] = BOOT_CMD_REPORT_ID;	/* Report:ReportID */
-	command[9] = BOOT_WRITE_FLASH;		/* Report:program  command */
-	command[10] = *ECH = ++(*pcommand_id);	/* Report:echo */
-	command[11] = ulAddress & 0x000000ff;
-	command[12] = (ulAddress & 0x0000ff00) >> 8;
-	command[13] = (ulAddress & 0x00ff0000) >> 16;
-	command[14] = (ulAddress & 0xff000000) >> 24;	/* Report:address(4bytes) */
-	command[15] = 8;				/* Report:size(8*8=64) */
-
-	sum = 0;
-	for (i = 4; i < 16; i++)
-		sum += command[i];
-	command[MAX_COM_SIZE - 2] = ~sum+1;		/* Report:command checksum */
-
-	sum = 0;
-	for (i = 16; i < (FLASH_BLOCK_SIZE + 16); i++) {
-		command[i] = flash_data[ulAddress+(i-16)];
-		sum += flash_data[ulAddress+(i-16)];
-	}
-
-	command[MAX_COM_SIZE - 1] = ~sum+1;		/* Report:data checksum */
-
-	udelay(50);
-
-	ret = wac_i2c->wacom_i2c_send(wac_i2c, command,
-			(BOOT_CMD_SIZE + 4), WACOM_FLASH_W9012);
-	if (ret < 0) {
-		dev_err(&wac_i2c->client->dev, "%s: 1 ret:%d \n",
-						__func__, ret);
-		return false;
-	}
-
-	udelay(50);
-
-	return true;
-}
-
-static bool flash_write_w9012(struct wacom_i2c *wac_i2c, unsigned char *flash_data,
-			      unsigned long start_address, unsigned long *max_address)
-{
-	u8 command_id = 0;
-	u8 command[BOOT_RSP_SIZE];
-	u8 response[BOOT_RSP_SIZE];
-	int ret, i, j, len, ECH = 0, ECH_len = 0;
-	int ECH_ARRAY[3];
-	unsigned long ulAddress;
-
-	dev_info(&wac_i2c->client->dev, "%s\n", __func__);
-	j = 0;
-	for (ulAddress = start_address; ulAddress < *max_address;
-					ulAddress += FLASH_BLOCK_SIZE) {
-		for (i = 0; i < FLASH_BLOCK_SIZE; i++) {
-			if (flash_data[ulAddress+i] != 0xFF)
+	for (ulAddr = startAddr; ulAddr <= maxAddr; ulAddr += BLOCK_SIZE_W) {
+		sum = 0;
+		buf[0] = FLASH_WRITE;
+		buf[1] = (u8) (ulAddr & 0xff);
+		buf[2] = (u8) ((ulAddr & 0xff00) >> 8);
+		buf[3] = size;
+		buf[4] = bank;
+#ifdef CONFIG_EPEN_WACOM_G9PM
+		/*Pass Garbage*/
+		for (i = 0; i < BLOCK_SIZE_W; i++) {
+			if (fw_data[ulAddr+i] != 0xff)
 				break;
 		}
-		if (i == (FLASH_BLOCK_SIZE))
+		if (i == BLOCK_SIZE_W) {
+			input_info(true, &client->dev, "Pass ulAddr %u\n",
+				(unsigned int)ulAddr);
 			continue;
+		}
+#endif
 
-		if (!flash_write_block_w9012(wac_i2c,
-				flash_data, ulAddress, &command_id, &ECH))
-			return false;
+		for (i = 0; i < 5; i++)
+			sum += buf[i];
 
-		if (ECH_len == 3)
-			ECH_len = 0;
+		sum = ~sum + 1;
+		buf[5] = sum;
 
-		ECH_ARRAY[ECH_len++] = ECH;
+		len = 6;
 
-		if (ECH_len == 3) {
-			for (j = 0; j < 3; j++) {
-				do {
-					len = 0;
-					command[len++] = 4;
-					command[len++] = 0;
-					command[len++] = 0x38;
-					command[len++] = CMD_GET_FEATURE;
-					command[len++] = 5;
-					command[len++] = 0;
-
-					udelay(50);
-
-					ret = wac_i2c->wacom_i2c_send(wac_i2c,
-							command, len, WACOM_FLASH_W9012);
-					if (ret < 0) {
-						dev_err(&wac_i2c->client->dev,
-							"%s: failing 2:%d; system returning: %d\n",
-							__func__, i, ret);
-						return false;
-					}
-
-					udelay(50);
-
-					ret = wac_i2c->wacom_i2c_recv(wac_i2c,
-							response, BOOT_RSP_SIZE, WACOM_FLASH_W9012);
-					if (ret < 0) {
-						dev_err(&wac_i2c->client->dev,
-							"%s: failing 3:%d system returning %d \n",
-							__func__, i, ret);
-						return false;
-					}
-
-					if ((response[3] != 0x01 || response[4] != ECH_ARRAY[j])
-							|| (response[5] != 0xff && response[5] != 0x00))
-						return false;
-
-					udelay(50);
-
-				} while (response[3] == 0x01 && response[4]
-						== ECH_ARRAY[j] && response[5] == 0xff);
+		/* 2012/07/18
+		* if the returned data is not equal to the length of the bytes
+		* that is supposed to send/receive, return it as fail
+		*/
+		for (k = 0; k < RETRY_TRANSFER; k++) {
+			ret = wacom_i2c_send(wac_i2c, buf, len, true);
+			if (ret == len)
+				break;
+			if (ret < 0 || k == (RETRY_TRANSFER - 1)) {
+				input_err(true, &client->dev, "Write process aborted\n");
+				return ERR_FAILED_ENTER;
 			}
 		}
+		/*2012/07/18*/
+
+		msleep(10);
+		len = 1;
+		j = 0;
+		do {
+			msleep(5);
+			ret = wacom_i2c_recv(wac_i2c,
+						buf, len, true);
+			j++;
+
+			if (j > RETRY || buf[0] == 0x90) {
+				/*0xff:No data 0x90:Checksum error */
+				input_err(true, &client->dev, "Error: %x , 0x%lx(%d)\n",
+					buf[0], ulAddr, __LINE__);
+				return -1;
+			}
+
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
+		} while (buf[0] == 0xff || buf[0] != 0x06);
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
+
+		msleep(1);
+
+		sum = 0;
+		for (i = 0; i < BLOCK_SIZE_W; i++) {
+			buf[i] = fw_data[ulAddr + i];
+			sum += fw_data[ulAddr + i];
+		}
+		sum = ~sum + 1;
+		buf[BLOCK_SIZE_W] = sum;
+		len = BLOCK_SIZE_W + 1;
+
+		/* 2012/07/18
+		* if the returned data is not equal to the length of the bytes
+		* that is supposed to send/receive, return it as fail
+		*/
+		for (k = 0; k < RETRY_TRANSFER; k++) {
+			ret = wacom_i2c_send(wac_i2c, buf, len, true);
+			if (ret == len)
+				break;
+			if (ret < 0 || k == (RETRY_TRANSFER - 1)) {
+				input_err(true, &client->dev, "Write process aborted\n");
+				return ERR_FAILED_ENTER;
+			}
+		}
+		/*2012/07/18*/
+
+		msleep(50);
+		len = 1;
+		j = 0;
+
+		do {
+			msleep(10);
+			ret = wacom_i2c_recv(wac_i2c,
+						buf, len, true);
+			j++;
+
+			if (j > RETRY || buf[0] == 0x82 || buf[0] == 0x90) {
+				/*
+				   0xff:No data
+				   0x82:Write error
+				   0x90:Checksum error
+				 */
+				input_err(true, &client->dev, "Error: %x , 0x%lx(%d)\n",
+					buf[0], ulAddr, __LINE__);
+				return -1;
+			}
+
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
+		} while (buf[0] == 0xff || buf[0] != 0x06);
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
+
+		if (printk_timed_ratelimit(&swtich_slot_time, 5000))
+			input_info(true, &client->dev, "Written on:0x%lx", ulAddr);
+		msleep(1);
 	}
-	return true;
+	input_info(true, &client->dev, "\nWriting done\n");
+
+	return 0;
+}
+
+int wacom_i2c_flash_verify(struct wacom_i2c *wac_i2c, unsigned long startAddr,
+			   u8 size, unsigned long maxAddr)
+{
+	struct i2c_client *client = wac_i2c->client;
+	unsigned long ulAddr;
+	int ret, len, i, j, k;
+	char sum;
+	u8 buf[WRITE_BUFF], bank;
+	unsigned long swtich_slot_time;
+
+	ret = len = i = 0;
+	bank = BANK;
+
+	for (ulAddr = startAddr; ulAddr <= maxAddr; ulAddr += BLOCK_SIZE_W) {
+		sum = 0;
+		buf[0] = FLASH_VERIFY;
+		buf[1] = (u8) (ulAddr & 0xff);
+		buf[2] = (u8) ((ulAddr & 0xff00) >> 8);
+		buf[3] = size;
+		buf[4] = bank;
+
+		for (i = 0; i < 5; i++)
+			sum += buf[i];
+		sum = ~sum + 1;
+		buf[5] = sum;
+
+		len = 6;
+		j = 0;
+		/*sleep */
+
+		/* 2012/07/18
+		* if the returned data is not equal to the length of the bytes
+		* that is supposed to send/receive, return it as fail
+		*/
+		for (k = 0; k < RETRY_TRANSFER; k++) {
+			ret = wacom_i2c_send(wac_i2c, buf, len, true);
+			if (ret == len)
+				break;
+			if (ret < 0 || k == (RETRY_TRANSFER - 1)) {
+				input_err(true, &client->dev, "Write process aborted\n");
+				return ERR_FAILED_ENTER;
+			}
+		}
+		/*2012/07/18*/
+
+		len = 1;
+
+		do {
+			msleep(1);
+			ret = wacom_i2c_recv(wac_i2c,
+						buf, len, true);
+			j++;
+			if (j > RETRY || buf[0] == 0x90) {
+				/*0xff:No data 0x90:Checksum error */
+				input_err(true, &client->dev, "Error: %x , 0x%lx(%d)\n",
+					buf[0], ulAddr, __LINE__);
+				return -1;
+			}
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
+		} while (buf[0] == 0xff || buf[0] != 0x06);
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
+
+		msleep(1);
+		sum = 0;
+		for (i = 0; i < BLOCK_SIZE_W; i++) {
+			buf[i] = fw_data[ulAddr + i];
+			sum += fw_data[ulAddr + i];
+		}
+		sum = ~sum + 1;
+		buf[BLOCK_SIZE_W] = sum;
+		len = BLOCK_SIZE_W + 1;
+
+		/* 2012/07/18
+		* if the returned data is not equal to the length of the bytes
+		* that is supposed to send/receive, return it as fail
+		*/
+		for (k = 0; k < RETRY_TRANSFER; k++) {
+			ret = wacom_i2c_send(wac_i2c, buf, len, true);
+			if (ret == len)
+				break;
+			if (ret < 0 || k == (RETRY_TRANSFER - 1)) {
+				input_err(true, &client->dev, "Write process aborted\n");
+				return ERR_FAILED_ENTER;
+			}
+		}
+		/*2012/07/18*/
+
+		len = 1;
+		j = 0;
+		do {
+			msleep(2);
+			ret = wacom_i2c_recv(wac_i2c,
+						buf, len, true);
+			j++;
+
+			if (j > RETRY || buf[0] == 0x81 || buf[0] == 0x90) {
+				/*
+				   0xff:No data
+				   0x82:Write error
+				   0x90:Checksum error
+				 */
+				input_err(true, &client->dev, "Error: %x , 0x%lx(%d)\n",
+					buf[0], ulAddr, __LINE__);
+				return -1;
+			}
+
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
+		} while (buf[0] == 0xff || buf[0] != 0x06);
+		/* 2012/07/04 Evaluation if 0x06 or not added by Wacom*/
+
+		if (printk_timed_ratelimit(&swtich_slot_time, 5000))
+			input_info(true, &client->dev, "Verified:0x%lx", ulAddr);
+		msleep(1);
+	}
+
+	input_info(true, &client->dev, "\nVerifying done\n");
+
+	return 0;
 }
 
 int wacom_i2c_flash(struct wacom_i2c *wac_i2c)
 {
-	unsigned long max_address = 0;
-	unsigned long start_address;
-	int i, ret = 0;
-	int eraseBlock[200], eraseBlockNum;
+	struct i2c_client *client = wac_i2c->client;
+	int ret = 0, blver = 0, mcu = 0;
+	u32 max_addr = 0, cmd_addr = 0;
+	bool valid_hex = false;
+	int cnt = 0;
 
-	if (wac_i2c->ic_mpu_ver != MPU_W9007 && wac_i2c->ic_mpu_ver != MPU_W9010 && wac_i2c->ic_mpu_ver != MPU_W9012)
-		return -EXIT_FAIL_GET_MPU_TYPE;
+	if (fw_data == NULL) {
+		input_err(true, &client->dev, "Data is NULL. Exit.\n");
+		return -1;
+	}
 
-	wac_i2c->compulsory_flash_mode(wac_i2c, true);
-	/*Reset*/
-	wac_i2c->reset_platform_hw(wac_i2c);
-	msleep(300);
-	dev_err(&wac_i2c->client->dev, "%s: Set FWE\n", __func__);
+	wac_i2c->pdata->compulsory_flash_mode(true);
+	/*Reset */
+	wac_i2c->pdata->reset_platform_hw();
+	msleep(200);
 
-	ret = wacom_enter_bootloader(wac_i2c);
+	ret = wacom_i2c_flash_cmd(wac_i2c);
+	if (ret < 0)
+		goto fw_update_error;
+	msleep(10);
+
+	ret = wacom_i2c_flash_enter(wac_i2c);
+	input_info(true, &client->dev, "flashEnter:%d\n", ret);
+	msleep(10);
+
+	blver = wacom_i2c_flash_BLVer(wac_i2c);
+	input_info(true, &client->dev, "blver:%d\n", blver);
+	msleep(10);
+
+	mcu = wacom_i2c_flash_mcuId(wac_i2c);
+	input_info(true, &client->dev, "mcu:%x\n", mcu);
+	if (mpu_type != mcu) {
+		input_info(true, &client->dev, "mcu:%x\n", mcu);
+		ret = -ENXIO;
+		goto mcu_type_error;
+	}
+	msleep(1);
+
+	switch (mcu) {
+	case MPUVER_W8501:
+		input_info(true, &client->dev, "flashing for w8501 started\n");
+		max_addr = MAX_ADDR_W8501;
+		cmd_addr = MAX_BLOCK_W8501;
+		break;
+
+	case MPUVER_514:
+		input_info(true, &client->dev, "Flashing for 514 started\n");
+		max_addr = MAX_ADDR_514;
+		cmd_addr = MAX_BLOCK_514;
+		break;
+
+	case MPUVER_505:
+		input_info(true, &client->dev, "Flashing for 505 started\n");
+		max_addr = MAX_ADDR_505;
+		cmd_addr = MAX_BLOCK_505;
+		break;
+
+	default:
+		input_info(true, &client->dev, "default called\n");
+		goto mcu_type_error;
+		break;
+	}
+
+	/*2012/07/04: below modified by Wacom*/
+	/*If wacom_i2c_flash_verify returns -ERR_HEX, */
+	/*please redo whole process of flashing from  */
+	/*wacom_i2c_flash_erase                       */
+	do {
+		cnt++;
+		ret = wacom_i2c_flash_erase(wac_i2c, FLASH_ERASE,
+				cmd_addr, END_BLOCK);
+		if (ret < 0) {
+			input_err(true, &client->dev, "error - erase\n");
+			continue;
+		}
+		msleep(20);
+
+		ret = wacom_i2c_flash_write(wac_i2c, START_ADDR,
+				NUM_BLOCK_2WRITE, max_addr);
+		if (ret < 0) {
+			input_err(true, &client->dev, "error - writing\n");
+			continue;
+		}
+		msleep(20);
+
+		ret = wacom_i2c_flash_verify(wac_i2c, START_ADDR,
+				    NUM_BLOCK_2WRITE, max_addr);
+
+		if (ret == -ERR_HEX)
+			input_info(true, &client->dev, "firmware is not valied\n");
+		else if (ret < 0) {
+			input_err(true, &client->dev, "error - verifying\n");
+			continue;
+		} else
+			valid_hex = true;
+	} while ((!valid_hex) && (cnt < 2));
+	/*2012/07/04: Wacom*/
+
 	if (ret < 0) {
-		dev_err(&wac_i2c->client->dev,
-				"%s: failed to enter bootloader mode\n", __func__);
-		goto flashing_fw_err;
-	}
-
-	dev_err(&wac_i2c->client->dev,
-			"%s: enter bootloader mode, erase & writing firmware\n", __func__);
-
-	/*Set start and end address and block numbers*/
-	eraseBlockNum = 0;
-	start_address = START_ADDR_W9012;
-	max_address = MAX_ADDR_W9012;
-
-	for (i = BLOCK_NUM_W9012; i >= 8; i--) {
-		eraseBlock[eraseBlockNum] = i;
-		eraseBlockNum++;
-	}
-
-	/*Erase the old program code */
-	if (!flash_erase_w9012(wac_i2c, eraseBlock, eraseBlockNum)) {
-		dev_err(&wac_i2c->client->dev,
-				"%s: failed erase old firmware, %d\n",
-				__func__, ret);
-		goto flashing_fw_err;
-	}
-
-	/*Write the new program */
-	if (!flash_write_w9012(wac_i2c, wac_i2c->fw_data,
-				start_address, &max_address)) {
-		dev_err(&wac_i2c->client->dev,
-				"%s: failed writing new firmware, %d\n",
-				__func__, ret);
-		goto flashing_fw_err;
-	}
-
-	/*Enable */
-	ret = wacom_flash_end(wac_i2c);
-	if (ret < 0) {
-		dev_err(&wac_i2c->client->dev,
-				"%s: failed flash mode close, %d\n",
-				__func__, ret);
-		goto flashing_fw_err;
-	}
-
-	dev_err(&wac_i2c->client->dev,
-				"%s: Successed new Firmware writing\n",
-				__func__);
-
-flashing_fw_err:
-	wac_i2c->compulsory_flash_mode(wac_i2c, false);
-	msleep(150);
-
-	return ret;
-}
-
-int wacom_i2c_firm_update(struct wacom_i2c *wac_i2c)
-{
-	int ret = 0;
-	int retry = 3;
-
-	while (retry--) {
-		ret = wacom_i2c_flash(wac_i2c);
-		if (ret < 0)
-			dev_err(&wac_i2c->client->dev,
-				"%s: failed to write firmware(%d)\n",
-				__func__, ret);
-		else
-			dev_err(&wac_i2c->client->dev,
-				"%s: Successed to write firmware(%d)\n",
-				__func__, ret);
-		/* Reset IC */
-		wac_i2c->reset_platform_hw(wac_i2c);
-		if (ret >= 0)
-			return 0;
-	}
-
-	return ret;
-}
-
-int wacom_fw_load_from_UMS(struct wacom_i2c *wac_i2c)
-	{
-	struct file *fp;
-	mm_segment_t old_fs;
-	long fsize, nread;
-	int ret = 0;
-	const struct firmware *firm_data = NULL;
-
-	dev_info(&wac_i2c->client->dev,
-			"%s: Start firmware flashing (UMS).\n", __func__);
-
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
-
-	fp = filp_open(WACOM_UMS_FW_PATH, O_RDONLY, S_IRUSR);
-
-	if (IS_ERR(fp)) {
-		dev_err(&wac_i2c->client->dev,
-			"%s: failed to open %s.\n",
-			__func__, WACOM_UMS_FW_PATH);
-		ret = -ENOENT;
-		goto open_err;
-	}
-
-	fsize = fp->f_path.dentry->d_inode->i_size;
-	dev_info(&wac_i2c->client->dev,
-		"%s: start, file path %s, size %ld Bytes\n",
-		__func__, WACOM_UMS_FW_PATH, fsize);
-
-	firm_data = kzalloc(fsize, GFP_KERNEL);
-	if (IS_ERR(firm_data)) {
-		dev_err(&wac_i2c->client->dev,
-			"%s, kmalloc failed\n", __func__);
-			ret = -EFAULT;
-		goto malloc_error;
-	}
-
-	nread = vfs_read(fp, (char __user *)firm_data,
-		fsize, &fp->f_pos);
-
-	dev_info(&wac_i2c->client->dev,
-		"%s: nread %ld Bytes\n", __func__, nread);
-	if (nread != fsize) {
-		dev_err(&wac_i2c->client->dev,
-			"%s: failed to read firmware file, nread %ld Bytes\n",
-			__func__, nread);
-		ret = -EIO;
-		goto read_err;
-	}
-
-	filp_close(fp, current->files);
-	set_fs(old_fs);
-	/*start firm update*/
-	wac_i2c->fw_data=(unsigned char *)firm_data;
-
-	return 0;
-
-read_err:
-	kfree(firm_data);
-malloc_error:
-	filp_close(fp, current->files);
-open_err:
-	set_fs(old_fs);
-	return ret;
-}
-
-int wacom_load_fw_from_req_fw(struct wacom_i2c *wac_i2c)
-{
-	int ret = 0;
-	const struct firmware *firm_data = NULL;
-	char fw_path[WACOM_MAX_FW_PATH];
-
-	dev_info(&wac_i2c->client->dev, "%s\n", __func__);
-
-	/*Obtain MPU type: this can be manually done in user space */
-	dev_info(&wac_i2c->client->dev,
-			"%s: MPU type: %x , BOOT ver: %x\n",
-			__func__, wac_i2c->ic_mpu_ver, wac_i2c->boot_ver);
-
-	memset(&fw_path, 0, WACOM_MAX_FW_PATH);
-	if (wac_i2c->ic_mpu_ver == MPU_W9012) {
-			snprintf(fw_path, WACOM_MAX_FW_PATH,
-				"%s", WACOM_FW_NAME_W9012);
-	} else {
-		dev_info(&wac_i2c->client->dev,
-			"%s: firmware name is NULL. return -1\n",
-			__func__);
-		ret = -ENOENT;
-		goto firm_name_null_err;
-	}
-
-	ret = request_firmware(&firm_data, fw_path, &wac_i2c->client->dev);
-	if (ret < 0) {
-		dev_err(&wac_i2c->client->dev,
-		       "%s: Unable to open firmware. ret %d\n",
-				__func__, ret);
-		goto request_firm_err;
-	}
-
-	dev_info(&wac_i2c->client->dev, "%s: firmware name: %s, size: %d\n",
-			__func__, fw_path, (int)firm_data->size);
-
-	/* firmware version check */
-	if (wac_i2c->ic_mpu_ver == MPU_W9010 || wac_i2c->ic_mpu_ver == MPU_W9007 || wac_i2c->ic_mpu_ver == MPU_W9012)
-		wac_i2c->wac_query_data->fw_version_bin =
-			(firm_data->data[FIRM_VER_LB_ADDR_W9012] |
-			(firm_data->data[FIRM_VER_UB_ADDR_W9012] << 8));
-
-	dev_info(&wac_i2c->client->dev, "%s: firmware version = %x\n",
-			__func__, wac_i2c->wac_query_data->fw_version_bin);
-	wac_i2c->fw_data=(unsigned char *)firm_data->data;
-	release_firmware(firm_data);
-
-firm_name_null_err:
-request_firm_err:
-	return ret;
-}
-
-int wacom_i2c_usermode(struct wacom_i2c *wac_i2c)
-{
-	int ret;
-	bool bRet = false;
-
-	wac_i2c->compulsory_flash_mode(wac_i2c, true);
-
-	ret = wacom_enter_flash_mode(wac_i2c);
-	if (ret < 0) {
-		dev_err(&wac_i2c->client->dev,
-			"%s cannot send flash command at user-mode \n", 
-			__func__);
+		input_info(true, &client->dev, "failed to flash fw\n");
 		return ret;
 	}
 
-	/*Return to the user mode */
-	dev_info(&wac_i2c->client->dev,
-		"%s closing the boot mode \n", __func__);
-	bRet = wacom_flash_end(wac_i2c);
-	if (!bRet) {
-		dev_err(&wac_i2c->client->dev,
-			"%s closing boot mode failed  \n", __func__);
-		ret = -EXIT_FAIL_WRITING_MARK_NOT_SET;
-		goto end_usermode;
+	input_info(true, &client->dev, "Firmware successfully updated\n");
+	msleep(10);
+
+ mcu_type_error:
+	ret = wacom_i2c_flash_end(wac_i2c);
+	if (ret < 0) {
+		input_err(true, &client->dev, "error - wacom_i2c_flash_end\n");
+		return ret;
 	}
 
-	wac_i2c->compulsory_flash_mode(wac_i2c, false);
+ fw_update_error:
+	wac_i2c->pdata->compulsory_flash_mode(false);
+	/*Reset*/
+	wac_i2c->pdata->reset_platform_hw();
+	msleep(200);
 
-	dev_info(&wac_i2c->client->dev,
-		"%s making user-mode completed \n", __func__);
-	ret = EXIT_OK;
-
-
- end_usermode:
 	return ret;
 }
-

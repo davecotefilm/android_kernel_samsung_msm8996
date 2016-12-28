@@ -9,14 +9,20 @@
 
 enum coagent_cmd {
 	COA_INIT = 0,
-	COA_GAMEPAD_STATUS,
-};	
+	COA_USB_STATUS,
+};
 
 enum coagent_param {
 	COA_STATUS_UNKNOWN = 0,	
 	COA_STATUS_OK,
 	COA_STATUS_NOK,
-};	
+};
+
+enum coagent_device {
+	COA_DEVICE_UNKNOWN = 0,	
+	COA_DEVICE_GAMEPAD,
+	COA_DEVICE_LANHUB,
+};
 
 #define COAGENT_CMD(n) (n & 0xf)
 #define COAGENT_PARAM(n) ((n >> 4) & 0xf)

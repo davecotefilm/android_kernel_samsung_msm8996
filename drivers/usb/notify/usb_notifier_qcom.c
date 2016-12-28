@@ -16,20 +16,63 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #endif
-#ifdef CONFIG_MUIC_NOTIFIER
+#if defined(CONFIG_CCIC_NOTIFIER)
+#include <linux/ccic/ccic_notifier.h>
+#endif
+#if defined(CONFIG_MUIC_NOTIFIER)
 #include <linux/muic/muic.h>
 #include <linux/muic/muic_notifier.h>
 #endif
-#ifdef CONFIG_VBUS_NOTIFIER
+#if defined(CONFIG_VBUS_NOTIFIER)
 #include <linux/vbus_notifier.h>
 #endif
-#include <linux/battery/sec_charging_common.h>
+#include <linux/power_supply.h>
+#if defined(CONFIG_USB_TYPEC_MANAGER_NOTIFIER)
+#include <linux/usb/manager/usb_typec_manager_notifier.h>
+#endif
+
+static inline struct power_supply *get_power_supply_by_name(char *name)
+{
+	if (!name)
+		return (struct power_supply *)NULL;
+	else
+		return power_supply_get_by_name(name);
+}
+
+#define psy_do_property(name, function, property, value) \
+{	\
+	struct power_supply *psy;	\
+	int ret;	\
+	psy = get_power_supply_by_name((name));	\
+	if (!psy) {	\
+		pr_err("%s: Fail to "#function" psy (%s)\n",	\
+			__func__, (name));	\
+		value.intval = 0;	\
+	} else {	\
+		if (psy->function##_property != NULL) { \
+			ret = psy->function##_property(psy, (property), &(value)); \
+			if (ret < 0) {	\
+				pr_err("%s: Fail to %s "#function" (%d=>%d)\n", \
+						__func__, name, (property), ret);	\
+				value.intval = 0;	\
+			}	\
+		}	\
+	}	\
+}
 
 extern void set_ncm_ready(bool ready);
 
 struct usb_notifier_platform_data {
-	struct	notifier_block usb_nb;
+#if defined(CONFIG_CCIC_NOTIFIER)
+	struct	notifier_block ccic_usb_nb;
+	int is_host;
+#endif
+#if defined(CONFIG_MUIC_NOTIFIER)
+	struct	notifier_block muic_usb_nb;
+#endif
+#if defined(CONFIG_VBUS_NOTIFIER)
 	struct	notifier_block vbus_nb;
+#endif
 	int	gpio_redriver_en;
 	int disable_control_en;
 };
@@ -70,14 +113,58 @@ static int of_usb_notifier_dt(struct device *dev,
 }
 #endif
 
-#ifdef CONFIG_MUIC_NOTIFIER
-static int usb_handle_notification(struct notifier_block *nb,
+#if defined(CONFIG_CCIC_NOTIFIER)
+static int ccic_usb_handle_notification(struct notifier_block *nb,
 		unsigned long action, void *data)
 {
-	muic_attached_dev_t attached_dev = *(muic_attached_dev_t *)data;
-	struct otg_notify *o_notify;
+	CC_NOTI_USB_STATUS_TYPEDEF usb_status = * (CC_NOTI_USB_STATUS_TYPEDEF *)data;
+	struct otg_notify *o_notify = get_otg_notify();
+	struct usb_notifier_platform_data *pdata =
+		container_of(nb, struct usb_notifier_platform_data, ccic_usb_nb);
 
-	o_notify = get_otg_notify();
+	if(usb_status.dest != CCIC_NOTIFY_DEV_USB) {
+		return 0;
+	}
+
+	switch (usb_status.drp){
+		case USB_STATUS_NOTIFY_ATTACH_DFP:
+			pr_info("%s: Turn On Host(DFP)\n", __func__);
+			send_otg_notify(o_notify, NOTIFY_EVENT_HOST, 1);
+			pdata->is_host = 1;
+			break;
+		case USB_STATUS_NOTIFY_ATTACH_UFP:
+			pr_info("%s: Turn On Device(UFP)\n", __func__);
+			send_otg_notify(o_notify, NOTIFY_EVENT_VBUS, 1);
+			if(is_blocked(o_notify, NOTIFY_BLOCK_TYPE_CLIENT))
+				return -EPERM;
+			break;
+		case USB_STATUS_NOTIFY_DETACH:
+			if(pdata->is_host) {
+				pr_info("%s: Turn Off Host(DFP)\n", __func__);
+				send_otg_notify(o_notify, NOTIFY_EVENT_HOST, 0);
+				pdata->is_host = 0;
+			} else {
+				pr_info("%s: Turn Off Device(UFP)\n", __func__);
+				send_otg_notify(o_notify, NOTIFY_EVENT_VBUS, 0);
+			}
+			break;
+		default:
+			pr_info("%s: unsupported DRP type : %d.\n", __func__, usb_status.drp);
+			break;
+		}
+	return 0;
+}
+#elif defined(CONFIG_MUIC_NOTIFIER)
+static int muic_usb_handle_notification(struct notifier_block *nb,
+		unsigned long action, void *data)
+{
+#ifdef CONFIG_CCIC_NOTIFIER
+	CC_NOTI_ATTACH_TYPEDEF *p_noti = (CC_NOTI_ATTACH_TYPEDEF *)data;
+	muic_attached_dev_t attached_dev = p_noti->cable_type;
+#else
+	muic_attached_dev_t attached_dev = *(muic_attached_dev_t *)data;
+#endif
+	struct otg_notify *o_notify = get_otg_notify();
 
 	pr_info("%s action=%lu, attached_dev=%d\n",
 		__func__, action, attached_dev);
@@ -102,6 +189,15 @@ static int usb_handle_notification(struct notifier_block *nb,
 		else if (action == MUIC_NOTIFY_CMD_ATTACH)
 			send_otg_notify(o_notify, NOTIFY_EVENT_HOST, 1);
 		else
+			pr_err("%s - ACTION Error!\n", __func__);
+		break;
+	case ATTACHED_DEV_USB_LANHUB_MUIC:
+		if (action == MUIC_NOTIFY_CMD_DETACH) {
+			send_otg_notify(o_notify, NOTIFY_EVENT_LANHUB, 0);
+		} else if (action == MUIC_NOTIFY_CMD_ATTACH) {
+			send_otg_notify(o_notify, NOTIFY_EVENT_DRIVE_VBUS, 0);
+			send_otg_notify(o_notify, NOTIFY_EVENT_LANHUB, 1);
+		} else
 			pr_err("%s - ACTION Error!\n", __func__);
 		break;
 	case ATTACHED_DEV_HMT_MUIC:
@@ -169,8 +265,7 @@ static int usb_handle_notification(struct notifier_block *nb,
 	return 0;
 }
 #endif
-
-#ifdef CONFIG_VBUS_NOTIFIER
+#if defined(CONFIG_VBUS_NOTIFIER)
 static int vbus_handle_notification(struct notifier_block *nb,
 		unsigned long cmd, void *data)
 {
@@ -294,7 +389,9 @@ static struct otg_notify sec_otg_notify = {
 	.is_wakelock = 1,
 	.disable_control = 1,
 	.device_check_sec = 3,
-	.auto_drive_vbus = 1,
+#if !defined(CONFIG_CCIC_NOTIFIER)
+	.auto_drive_vbus = NOTIFY_OP_PRE,
+#endif	
 	.set_battcall = set_online,
 };
 
@@ -328,15 +425,23 @@ static int usb_notifier_probe(struct platform_device *pdev)
 		sec_otg_notify.disable_control = 1;
 	set_otg_notify(&sec_otg_notify);
 	set_notify_data(&sec_otg_notify, pdata);
-#ifdef CONFIG_MUIC_NOTIFIER
-	muic_notifier_register(&pdata->usb_nb, usb_handle_notification,
+#if defined(CONFIG_CCIC_NOTIFIER)
+	pdata->is_host = 0;
+#ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
+	manager_notifier_register(&pdata->ccic_usb_nb, ccic_usb_handle_notification,
+		MANAGER_NOTIFY_CCIC_USB);
+#else
+	ccic_notifier_register(&pdata->ccic_usb_nb, ccic_usb_handle_notification,
+				   CCIC_NOTIFY_DEV_USB);
+#endif
+#elif defined(CONFIG_MUIC_NOTIFIER)
+	muic_notifier_register(&pdata->muic_usb_nb, muic_usb_handle_notification,
 			       MUIC_NOTIFY_DEV_USB);
 #endif
-#ifdef CONFIG_VBUS_NOTIFIER
+#if defined(CONFIG_VBUS_NOTIFIER)
 	vbus_notifier_register(&pdata->vbus_nb, vbus_handle_notification,
 			       MUIC_NOTIFY_DEV_USB);
 #endif
-
 	dev_info(&pdev->dev, "usb notifier probe\n");
 	return 0;
 }
@@ -344,12 +449,18 @@ static int usb_notifier_probe(struct platform_device *pdev)
 static int usb_notifier_remove(struct platform_device *pdev)
 {
 	struct usb_notifier_platform_data *pdata = dev_get_platdata(&pdev->dev);
-	
-#ifdef CONFIG_MUIC_NOTIFIER
-	muic_notifier_unregister(&pdata->usb_nb);
+#if defined(CONFIG_CCIC_NOTIFIER)
+#ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
+	manager_notifier_register(&pdata->ccic_usb_nb, ccic_usb_handle_notification,
+		MANAGER_NOTIFY_CCIC_USB);
+#else
+	ccic_notifier_unregister(&pdata->ccic_usb_nb);
 #endif
-#ifdef CONFIG_VBUS_NOTIFIER
-	muic_notifier_unregister(&pdata->vbus_nb);
+#elif defined(CONFIG_MUIC_NOTIFIER)
+	muic_notifier_unregister(&pdata->muic_usb_nb);
+#endif
+#if defined(CONFIG_VBUS_NOTIFIER)
+	vbus_notifier_unregister(&pdata->vbus_nb);
 #endif
 	return 0;
 }

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -816,7 +816,13 @@ struct vss_icommon_cmd_set_ui_property_enable_t {
 #define VOICEPROC_MODULE_VENC        0x00010F07
 #define VOICE_PARAM_LOOPBACK_ENABLE  0x00010E18
 
+//Rx
 #define VOICE_VOICEMODE_MODULE	0x10001001
+#define VOICE_DHA_PARAM         0x10001022
+//Tx
+#define VOICE_WISEVOICE_MODULE	0x10001031
+#define VOICE_FVSAM_MODULE	0x10001041  //ForteMedia
+
 #define VOICE_NBMODE_PARAM	0x10001023
 #define VOICE_SPKMODE_PARAM	0x10001025
 
@@ -1062,12 +1068,12 @@ struct vss_istream_cmd_set_packet_exchange_mode_t {
 #define VSS_IVOCPROC_VOCPROC_MODE_EC_EXT_MIXING	0x00010F7D
 
 /* Default AFE port ID. Applicable to Tx and Rx. */
-#define VSS_IVOCPROC_PORT_ID_NONE			0xFFFF
+#define VSS_IVOCPROC_PORT_ID_NONE		0xFFFF
 
-#define VSS_NETWORK_ID_DEFAULT				0x00010037
-#define VSS_NETWORK_ID_VOIP_NB				0x00011240
-#define VSS_NETWORK_ID_VOIP_WB				0x00011241
-#define VSS_NETWORK_ID_VOIP_WV				0x00011242
+#define VSS_NETWORK_ID_DEFAULT		0x00010037
+
+/* Voice over Internet Protocol (VoIP) network ID. Common for all bands.*/
+#define VSS_NETWORK_ID_VOIP		0x00011362
 
 /* Media types */
 #define VSS_MEDIA_ID_EVRC_MODEM		0x00010FC2
@@ -1076,8 +1082,12 @@ struct vss_istream_cmd_set_packet_exchange_mode_t {
 /* 80-VF690-47 UMTS AMR-NB vocoder modem format. */
 #define VSS_MEDIA_ID_AMR_WB_MODEM	0x00010FC7
 /* 80-VF690-47 UMTS AMR-WB vocoder modem format. */
-#define VSS_MEDIA_ID_PCM_NB		0x00010FCB
-#define VSS_MEDIA_ID_PCM_WB		0x00010FCC
+
+#define VSS_MEDIA_ID_PCM_8_KHZ		0x00010FCB
+#define VSS_MEDIA_ID_PCM_16_KHZ		0x00010FCC
+#define VSS_MEDIA_ID_PCM_32_KHZ		0x00010FD9
+#define VSS_MEDIA_ID_PCM_48_KHZ		0x00010FD6
+
 /* Linear PCM (16-bit, little-endian). */
 #define VSS_MEDIA_ID_G711_ALAW		0x00010FCD
 /* G.711 a-law (contains two 10ms vocoder frames). */
@@ -1453,6 +1463,28 @@ struct cvp_set_mute_cmd {
 } __packed;
 
 #ifdef CONFIG_SEC_VOC_SOLUTION
+struct cvp_dha_parm_send_t {
+	uint32_t module_id;
+	/* Unique ID of the module. */
+	uint32_t param_id;
+	/* Unique ID of the parameter. */
+	uint16_t param_size;
+	/* Size of the parameter in bytes: MOD_ENABLE_PARAM_LEN */
+	uint16_t reserved;
+	/* Reserved; set to 0. */
+	uint16_t eq_mode;
+	uint16_t select;
+	int16_t param[12];
+} __packed;
+
+struct cvp_dha_parm_send_cmd {
+	struct apr_hdr hdr;
+	uint32_t mem_handle;
+	uint64_t mem_address;
+	uint32_t mem_size;
+	struct cvp_dha_parm_send_t dha_send;
+} __packed;
+
 struct cvp_set_nbmode_enable_cmd {
 	struct apr_hdr hdr;
 	struct vss_icommon_cmd_set_ui_property_enable_t cvp_set_nbmode;
@@ -1635,6 +1667,7 @@ struct voice_data {
 
 	struct power_supply *psy;
 #ifdef CONFIG_SEC_VOC_SOLUTION
+	u32 cvp_dha_state;
 	u32 cvp_nbmode_state;
 	u32 cvp_spkmode_state;
 #endif /* CONFIG_SEC_VOC_SOLUTION */
@@ -1831,6 +1864,7 @@ int voc_get_sound_focus(struct sound_focus_param *soundFocusData);
 int voc_get_source_tracking(struct source_tracking_param *sourceTrackingData);
 
 #ifdef CONFIG_SEC_VOC_SOLUTION
+int voice_sec_set_dha_data(uint16_t mode, uint16_t select, int16_t *parameters);
 int voice_sec_set_nbmode(short enable);
 int voice_sec_set_spkmode(short enable);
 int voc_get_loopback_enable(void);

@@ -26,7 +26,6 @@
 #include <linux/mfd/wcd9335/registers.h>
 #include <linux/mfd/wcd9xxx/pdata.h>
 #include <linux/regulator/consumer.h>
-#include <linux/regulator/rpm-smd-regulator.h> 
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
@@ -110,7 +109,7 @@
 /* Convert from vout ctl to micbias voltage in mV */
 #define WCD_VOUT_CTL_TO_MICB(v) (1000 + v * 50)
 
-#define TASHA_ZDET_NUM_MEASUREMENTS 100
+#define TASHA_ZDET_NUM_MEASUREMENTS 150
 #define TASHA_MBHC_GET_C1(c)  ((c & 0xC000) >> 14)
 #define TASHA_MBHC_GET_X1(x)  (x & 0x3FFF)
 /* z value compared in milliOhm */
@@ -205,13 +204,6 @@ struct tasha_mbhc_zdet_param {
 	u16 btn5;
 	u16 btn6;
 	u16 btn7;
-};
-
-/* Samsung impedance detection and additional digital gain */
-struct tasha_mbhc_impedance_gain_param {
-	uint32_t min;      /* Minimum impedance */
-	uint32_t max;      /* Maximum impedance */
-	int gain_offset;   /* Register value to set for this measurement */
 };
 
 static struct afe_param_cdc_reg_page_cfg tasha_cdc_reg_page_cfg = {
@@ -478,17 +470,6 @@ static const u32 vport_check_table[NUM_CODEC_DAIS] = {
 	BIT(AIF1_CAP) | BIT(AIF2_CAP) | BIT(AIF3_CAP),	     /* AIF4_MAD_TX */
 };
 
-/* Samsung impedance detection and additional digital gain */
-static const struct tasha_mbhc_impedance_gain_param impedance_table[] = {
-	{    0,      13, 0}, /* index 0 */
-	{   14,      42, 4}, /* index 1 */
-	{   43,     100, 5}, /* index 2 */
-	{  101,     200, 7}, /* index 3 */
-	{  201,     450, 8}, /* index 4 */
-	{  451,    1000, 8}, /* index 5 */
-	{ 1001, INT_MAX, 5}, /* index 6 */
-};
-
 /* Codec supports 2 IIR filters */
 enum {
 	IIR0 = 0,
@@ -634,6 +615,12 @@ static struct wcd_mbhc_register
 			  0, 0, 0, 0),
 	WCD_MBHC_REGISTER("WCD_MBHC_PULLDOWN_CTRL",
 			  0, 0, 0, 0),
+	/*
+	 * Noise Filter type changable
+	 * HPH_REF, GND_CFILT
+	 */
+	WCD_MBHC_REGISTER("WCD_MBHC_NOISE_FILT_CTRL",
+			  WCD9335_MICB2_TEST_CTL_3, 0x80, 7, 0),
 };
 
 static const struct wcd_mbhc_intr intr_ids = {
@@ -1501,6 +1488,10 @@ static inline void tasha_mbhc_get_result_params(struct wcd9xxx *wcd9xxx,
 				WCD9335_ANA_MBHC_ZDET, 0x20, 0x00);
 	x1 = TASHA_MBHC_GET_X1(val);
 	c1 = TASHA_MBHC_GET_C1(val);
+	/* If ramp is not complete, give additional 5ms */
+	if ((c1 < 2) && x1)
+		usleep_range(5000, 5050);
+
 	if (!c1 || !x1) {
 		dev_dbg(wcd9xxx->dev,
 			"%s: Impedance detect ramp error, c1=%d, x1=0x%x\n",
@@ -1623,6 +1614,7 @@ static void tasha_wcd_mbhc_calc_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
 {
 	struct snd_soc_codec *codec = mbhc->codec;
 	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
+	struct wcd9xxx_pdata *pdata = dev_get_platdata(codec->dev->parent);
 	struct wcd9xxx *wcd9xxx = tasha->wcd9xxx;
 	s16 reg0, reg1, reg2, reg3, reg4;
 	int32_t z1L, z1R, z1Ls;
@@ -1716,9 +1708,9 @@ left_ch_impedance:
 				__func__, *zl);
 
 	/* Samsung impedance detection and additional digital gain */
-	for(i = 0; i < ARRAY_SIZE(impedance_table); i++){
-		if (*zl >= impedance_table[i].min && *zl <= impedance_table[i].max ) {
-			mbhc->impedance_offset = impedance_table[i].gain_offset;
+	for(i = 0; i < ARRAY_SIZE(pdata->imp_table); i++){
+		if (*zl >= pdata->imp_table[i].min && *zl <= pdata->imp_table[i].max ) {
+			mbhc->impedance_offset = pdata->imp_table[i].gain;
 		}
 	}
 
@@ -1760,6 +1752,9 @@ right_ch_impedance:
 		dev_dbg(codec->dev,
 			"%s: plug type is invalid or extension cable\n",
 			__func__);
+#if defined(CONFIG_SEC_FACTORY)
+		mbhc->impedance_offset = 0;
+#endif
 		goto zdet_complete;
 	}
 	if ((*zl == TASHA_ZDET_FLOATING_IMPEDANCE) ||
@@ -1770,6 +1765,9 @@ right_ch_impedance:
 			"%s: Mono plug type with one ch floating or shorted to GND\n",
 			__func__);
 		mbhc->hph_type = WCD_MBHC_HPH_MONO;
+#if defined(CONFIG_SEC_FACTORY)
+		mbhc->impedance_offset = 0;
+#endif
 		goto zdet_complete;
 	}
 	snd_soc_update_bits(codec, WCD9335_HPH_R_ATEST, 0x02, 0x02);
@@ -5013,6 +5011,7 @@ static int tasha_codec_enable_dec(struct snd_soc_dapm_widget *w,
 	char *wname;
 	int ret = 0, amic_n;
 	u16 tx_vol_ctl_reg, pwr_level_reg = 0, dec_cfg_reg, hpf_gate_reg;
+	u16 tx_gain_ctl_reg;
 	char *dec;
 	u8 hpf_cut_off_freq;
 	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
@@ -5054,6 +5053,7 @@ static int tasha_codec_enable_dec(struct snd_soc_dapm_widget *w,
 
 	tx_vol_ctl_reg = WCD9335_CDC_TX0_TX_PATH_CTL + 16 * decimator;
 	hpf_gate_reg = WCD9335_CDC_TX0_TX_PATH_SEC2 + 16 * decimator;
+	tx_gain_ctl_reg = WCD9335_CDC_TX0_TX_VOL_CTL + 16 * decimator;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -5109,6 +5109,9 @@ static int tasha_codec_enable_dec(struct snd_soc_dapm_widget *w,
 			schedule_delayed_work(
 					&tasha->tx_hpf_work[decimator].dwork,
 					msecs_to_jiffies(300));
+		/* apply gain after decimator is enabled */
+		snd_soc_write(codec, tx_gain_ctl_reg,
+			      snd_soc_read(codec, tx_gain_ctl_reg));
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		snd_soc_update_bits(codec, tx_vol_ctl_reg, 0x10, 0x10);
@@ -5183,33 +5186,12 @@ static int tasha_codec_enable_adc(struct snd_soc_dapm_widget *w,
 		struct snd_kcontrol *kcontrol, int event)
 {
 	struct snd_soc_codec *codec = w->codec;
-	struct wcd9xxx *wcd9xxx = dev_get_drvdata(codec->dev->parent);
-	int ret;
 
 	dev_dbg(codec->dev, "%s: event:%d\n", __func__, event);
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
-		/* change s4 pwm mode to remove lcd on/off noise on old h/w */
-		if (!IS_ERR(wcd9xxx->s4_mode_regulator)) {
-			ret = rpm_regulator_set_mode(wcd9xxx->s4_mode_regulator,
-				RPM_REGULATOR_MODE_HPM); 
-			if (ret < 0) {
-				dev_err(codec->dev, "%s : failed to change s4 pwm mode\n",
-					__func__);
-			}
-		}
 		tasha_codec_set_tx_hold(codec, w->reg, true);
-		break;
-	case SND_SOC_DAPM_POST_PMD:
-		if (!IS_ERR(wcd9xxx->s4_mode_regulator)) {
-			ret = rpm_regulator_set_mode(wcd9xxx->s4_mode_regulator,
-				RPM_REGULATOR_MODE_AUTO); 
-			if (ret < 0) {
-				dev_err(codec->dev, "%s : failed to change s4 auto mode\n",
-					__func__);
-			}
-		}
 		break;
 	default:
 		break;
@@ -9631,8 +9613,7 @@ static const struct snd_soc_dapm_widget tasha_dapm_widgets[] = {
 	SND_SOC_DAPM_ADC_E("ADC1", NULL, WCD9335_ANA_AMIC1, 7, 0,
 			   tasha_codec_enable_adc, SND_SOC_DAPM_PRE_PMU),
 	SND_SOC_DAPM_ADC_E("ADC2", NULL, WCD9335_ANA_AMIC2, 7, 0,
-			   tasha_codec_enable_adc,
-			   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+			   tasha_codec_enable_adc, SND_SOC_DAPM_PRE_PMU),
 	SND_SOC_DAPM_ADC_E("ADC3", NULL, WCD9335_ANA_AMIC3, 7, 0,
 			   tasha_codec_enable_adc, SND_SOC_DAPM_PRE_PMU),
 	SND_SOC_DAPM_ADC_E("ADC4", NULL, WCD9335_ANA_AMIC4, 7, 0,
@@ -10956,7 +10937,6 @@ static const struct tasha_reg_mask_val tasha_codec_reg_init_val_2_0[] = {
 	{WCD9335_HPH_REFBUFF_LP_CTL, 0x06, 0x02},
 	{WCD9335_HPH_L_EN, 0x20, 0x20},
 	{WCD9335_HPH_R_EN, 0x20, 0x20},
-	{WCD9335_CDC_TX0_TX_PATH_SEC7, 0xFF, 0x45},
 	{WCD9335_RX_BIAS_HPH_LOWPOWER, 0xF0, 0xC0},
 };
 

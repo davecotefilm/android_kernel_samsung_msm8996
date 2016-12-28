@@ -121,6 +121,7 @@ static u64 __maybe_unused gic_read_iar(void)
 	u64 irqstat;
 
 	asm volatile("mrs_s %0, " __stringify(ICC_IAR1_EL1) : "=r" (irqstat));
+	isb();
 	/* As per the architecture specification */
 	mb();
 	return irqstat;
@@ -129,6 +130,7 @@ static u64 __maybe_unused gic_read_iar(void)
 static void __maybe_unused gic_write_pmr(u64 val)
 {
 	asm volatile("msr_s " __stringify(ICC_PMR_EL1) ", %0" : : "r" (val));
+	isb();
 	/* As per the architecture specification */
 	mb();
 }
@@ -147,19 +149,10 @@ static void __maybe_unused gic_write_grpen1(u64 val)
 
 static void __maybe_unused gic_write_sgi1r(u64 val)
 {
-#ifdef CONFIG_MSM_GIC_SGI_NEEDS_BARRIER
-	static DEFINE_RAW_SPINLOCK(sgi_lock);
-	unsigned long flags;
-	raw_spin_lock_irqsave(&sgi_lock, flags);
-#endif
-
 	asm volatile("msr_s " __stringify(ICC_SGI1R_EL1) ", %0" : : "r" (val));
+	isb(); 
 	/* As per the architecture specification */
 	mb();
-#ifdef CONFIG_MSM_GIC_SGI_NEEDS_BARRIER
-	dsb(nsh);
-	raw_spin_unlock_irqrestore(&sgi_lock, flags);
-#endif
 }
 
 static void gic_enable_sre(void)
@@ -183,6 +176,7 @@ static void gic_enable_sre(void)
 		pr_err("GIC: unable to set SRE (disabled at EL2), panic ahead\n");
 }
 
+#ifdef CONFIG_ARM_GIC_V3_NO_ACCESS_CONTROL
 static void gic_enable_redist(bool enable)
 {
 	void __iomem *rbase;
@@ -216,6 +210,9 @@ static void gic_enable_redist(bool enable)
 		pr_err_ratelimited("redistributor failed to %s...\n",
 				   enable ? "wakeup" : "sleep");
 }
+#else
+static void gic_enable_redist(bool enable) { }
+#endif
 
 /*
  * Routines to disable, enable, EOI and route interrupts
@@ -361,6 +358,10 @@ static int gic_suspend(void)
 }
 
 extern int msm_show_resume_irq_mask;
+#ifdef CONFIG_SEC_PM
+extern char last_resume_kernel_reason[];
+extern int last_resume_kernel_reason_len;
+#endif
 
 static void gic_show_resume_irq(struct gic_chip_data *gic)
 {
@@ -403,6 +404,11 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 
 		pr_warn("Resume caused by HWIRQ %d(irq %d), %s\n",
 								i, irq, name);
+#ifdef CONFIG_SEC_PM
+		last_resume_kernel_reason_len += 
+			sprintf(last_resume_kernel_reason + last_resume_kernel_reason_len,
+			"HWIRQ %d(irq %d), %s|", i, irq, name);
+#endif
 	}
 }
 

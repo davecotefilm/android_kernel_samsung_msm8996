@@ -1006,8 +1006,8 @@ static noinline int avc_denied(u32 ssid, u32 tsid,
 
 #ifdef SEC_SELINUX_DEBUG
 
-        /* SEC_SELINUX : denied && auditallow means "never happen" at current sepolicy. */
-	if ( requested & avd->auditallow )  {
+        /* SEC_SELINUX : denied && auditallow means "never happen" at current sepolicy. Valid Enforcing denial only. */
+	if ( (requested & avd->auditallow) && selinux_enforcing && !(avd->flags & AVD_FLAGS_PERMISSIVE) )  {
 		char *scontext, *tcontext;
 		const char **perms;
 		int i, perm;
@@ -1052,13 +1052,8 @@ static noinline int avc_denied(u32 ssid, u32 tsid,
 	}
 #endif
 
-#if defined(CONFIG_SECURITY_SELINUX_ALWAYS_ENFORCE)
-	if (!(avd->flags & AVD_FLAGS_PERMISSIVE))
-		return -EACCES;
-#elif !defined(CONFIG_SECURITY_SELINUX_NEVER_ENFORCE)
 	if (selinux_enforcing && !(avd->flags & AVD_FLAGS_PERMISSIVE))
 		return -EACCES;
-#endif
 
 	avc_update_node(AVC_CALLBACK_GRANT, requested, cmd, ssid,
 				tsid, tclass, avd->seqno, NULL, flags);

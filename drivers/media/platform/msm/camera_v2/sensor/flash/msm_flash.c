@@ -21,6 +21,7 @@
 #if defined(CONFIG_LEDS_S2MPB02)
 #include <linux/leds-s2mpb02.h>
 #endif
+extern unsigned int system_rev;
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
@@ -280,7 +281,7 @@ static int32_t msm_flash_i2c_init(
 
 	rc = msm_camera_power_up(&flash_ctrl->power_info,
 		flash_ctrl->flash_device_type,
-		&flash_ctrl->flash_i2c_client);
+		&flash_ctrl->flash_i2c_client, false, SUB_DEVICE_TYPE_FLASH);
 	if (rc < 0) {
 		pr_err("%s msm_camera_power_up failed %d\n",
 			__func__, __LINE__);
@@ -365,7 +366,7 @@ static int32_t msm_flash_i2c_release(
 
 	rc = msm_camera_power_down(&flash_ctrl->power_info,
 		flash_ctrl->flash_device_type,
-		&flash_ctrl->flash_i2c_client);
+		&flash_ctrl->flash_i2c_client, false, SUB_DEVICE_TYPE_FLASH);
 	if (rc < 0) {
 		pr_err("%s msm_camera_power_down failed %d\n",
 			__func__, __LINE__);
@@ -717,14 +718,38 @@ static int32_t msm_flash_config(struct msm_flash_ctrl_t *flash_ctrl,
 	case CFG_FLASH_HIGH:
 		if (flash_ctrl->flash_state == MSM_CAMERA_FLASH_INIT) {
 #if defined(CONFIG_LEDS_S2MPB02)
+#if defined(CONFIG_SEC_GRACEQLTE_PROJECT)  // workaround for low capacity of battery
+			if (system_rev < 2) {
+				pr_err("CAM Flash ON - with Low Current (due to low capacity of battery in HW rev 00, 01) \n");
+				s2mpb02_led_en(S2MPB02_FLASH_LED_1, S2MPB02_FLASH_OUT_I_600MA);
+			} else {
+				pr_info("CAM Flash ON\n");
+				s2mpb02_led_en(S2MPB02_FLASH_LED_1, S2MPB02_FLASH_OUT_I_1000MA);/* flash, on */
+			}
+#else
 			pr_info("CAM Flash ON\n");
 			s2mpb02_led_en(S2MPB02_FLASH_LED_1, S2MPB02_FLASH_OUT_I_1000MA);/* flash, on */
+#endif
 #else
 			rc = flash_ctrl->func_tbl->camera_flash_high(
 				flash_ctrl, flash_data);
 #endif
 		}
 		break;
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA) && defined(CONFIG_LEDS_S2MPB02)
+	case CFG_FLASH_IR_DELAY:
+		s2mpb02_ir_led_pulse_delay(flash_data->ir_led_config);
+		break;
+	case CFG_FLASH_IR_WIDTH:
+		s2mpb02_ir_led_pulse_width(flash_data->ir_led_config);
+		break;
+	case CFG_FLASH_IR_CURRENT:
+		s2mpb02_ir_led_current(flash_data->ir_led_config);
+		break;
+	case CFG_FLASH_IR_MAXTIME:
+		s2mpb02_ir_led_max_time(flash_data->ir_led_config);
+		break;
+#endif
 	default:
 		rc = -EFAULT;
 		break;
@@ -1170,6 +1195,13 @@ static long msm_flash_subdev_do_ioctl(
 		case CFG_FLASH_LOW:
 		case CFG_FLASH_HIGH:
 		case CFG_FLASH_TORCH:
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+		case CFG_FLASH_IR_DELAY:
+		case CFG_FLASH_IR_WIDTH:
+		case CFG_FLASH_IR_CURRENT:
+		case CFG_FLASH_IR_MAXTIME:
+			flash_data.ir_led_config = u32->ir_led_config;
+#endif
 			flash_data.cfg.settings = compat_ptr(u32->cfg.settings);
 			break;
 		case CFG_FLASH_INIT:
@@ -1246,12 +1278,14 @@ static int32_t msm_flash_platform_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
+#if defined(CONFIG_LEDS_S2MPB02)
 	rc = msm_flash_pinctrl_init(flash_ctrl);
 	if (rc < 0) {
 		pr_err("%s:%d msm_flash_pinctrl_init failed\n",
 			__func__, __LINE__);
 		return -EINVAL;
 	}
+#endif
 
 	flash_ctrl->flash_state = MSM_CAMERA_FLASH_RELEASE;
 	flash_ctrl->power_info.dev = &flash_ctrl->pdev->dev;

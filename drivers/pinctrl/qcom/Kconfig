@@ -121,4 +121,12 @@ config SENSORS_FP_SPI_GPIO_END
 	int "Fingerprint spi gpio number end"
 	default 0
 
+config IRIS_I2C_GPIO_START
+	int "Iris i2c gpio number start"
+	default 0
+
+config IRIS_I2C_GPIO_END
+	int "Iris i2c gpio number end"
+	default 0
+
 endif

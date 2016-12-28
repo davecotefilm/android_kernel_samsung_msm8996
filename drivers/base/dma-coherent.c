@@ -19,7 +19,8 @@ struct dma_coherent_mem {
 
 static int dma_init_coherent_memory(phys_addr_t phys_addr, dma_addr_t device_addr,
 			     size_t size, int flags,
-			     struct dma_coherent_mem **mem)
+			     struct dma_coherent_mem **mem,
+			     bool ioremap_cached)
 {
 	struct dma_coherent_mem *dma_mem = NULL;
 	void __iomem *mem_base = NULL;
@@ -31,7 +32,10 @@ static int dma_init_coherent_memory(phys_addr_t phys_addr, dma_addr_t device_add
 	if (!size)
 		goto out;
 
-	mem_base = ioremap(phys_addr, size);
+	if (ioremap_cached == true)
+		mem_base = ioremap_cached(phys_addr, size);
+	else
+		mem_base = ioremap(phys_addr, size);
 	if (!mem_base)
 		goto out;
 
@@ -91,7 +95,7 @@ int dma_declare_coherent_memory(struct device *dev, phys_addr_t phys_addr,
 	int ret;
 
 	ret = dma_init_coherent_memory(phys_addr, device_addr, size, flags,
-				       &mem);
+				       &mem, false);
 	if (ret == 0)
 		return 0;
 
@@ -283,7 +287,7 @@ static int rmem_dma_device_init(struct reserved_mem *rmem, struct device *dev)
 	if (!mem &&
 	    dma_init_coherent_memory(rmem->base, rmem->base, rmem->size,
 				     DMA_MEMORY_MAP | DMA_MEMORY_EXCLUSIVE,
-				     &mem) != DMA_MEMORY_MAP) {
+				     &mem, true) != DMA_MEMORY_MAP) {
 		pr_err("Reserved memory: failed to init DMA memory pool at %pa, size %ld MiB\n",
 			&rmem->base, (unsigned long)rmem->size / SZ_1M);
 		return -ENODEV;

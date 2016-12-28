@@ -59,7 +59,7 @@ static int fts_fw_wait_for_flash_ready(struct fts_ts_info *info)
 }
 
 #ifdef FTS_SUPPORT_PARTIAL_DOWNLOAD
-static bool get_PureAutotune_status(struct fts_ts_info *info)
+bool get_PureAutotune_status(struct fts_ts_info *info)
 {
 	int rc;
 	unsigned char regAdd[3];
@@ -69,17 +69,8 @@ static bool get_PureAutotune_status(struct fts_ts_info *info)
 	regAdd[0] = 0xd0;
 	regAdd[1] = 0x00;
 	regAdd[2] = 0x58;
-	/*
-	regAdd[0] = 0xb3;
-	regAdd[1] = 0x00;
-	regAdd[2] = 0x01;
-	info->fts_write_reg(info, regAdd, 3);
-	fts_delay(1);
-
-	regAdd[0] = 0xb1;
-	regAdd[1] = 0xFF;
-	regAdd[2] = 0xE0;
-	*/
+	if (info->stm_ver == STM_VER7)
+		regAdd[2] = 0x4E;
 
 	rc = info->fts_read_reg(info, regAdd, 3, buf, 4);
 	if (!rc)
@@ -91,8 +82,11 @@ static bool get_PureAutotune_status(struct fts_ts_info *info)
 	if((buf[1] == 0xA5) && (buf[2] == 0x96))
 		retVal = true;
 	tsp_debug_info(true, info->dev, "%s: PureAutotune Information !! [Data : %2X%2X]\n", __func__, buf[1], buf[2]);
+	info->pat = retVal;
+
 	return retVal;
 }
+EXPORT_SYMBOL(get_PureAutotune_status);
 
 static bool get_AFE_status(struct fts_ts_info *info)
 {
@@ -104,8 +98,10 @@ static bool get_AFE_status(struct fts_ts_info *info)
 	regAdd[0] = 0xd0;
 	regAdd[1] = 0x00;
 	regAdd[2] = 0x5A;
+	if (info->stm_ver == STM_VER7)
+		regAdd[2] = 0x52;
 
-	rc = info->fts_read_reg(info, regAdd, 3, buf, 4);
+	rc = info->fts_read_reg(info, regAdd, 3, buf, 3);
 	if (!rc)
 	{
 		tsp_debug_info(true, info->dev, "%s: Read Fail - Final AFE [Data : %2X] AFE Ver [Data : %2X] \n", __func__, buf[1], buf[2]);
@@ -441,7 +437,7 @@ int fts_fw_wait_for_event(struct fts_ts_info *info, unsigned char eid)
 	return rc;
 }
 
-static int fts_fw_wait_for_event_D3(struct fts_ts_info *info, unsigned char eid0, unsigned char eid1)
+int fts_fw_wait_for_event_D3(struct fts_ts_info *info, unsigned char eid0, unsigned char eid1)
 {
 	int rc;
 	unsigned char regAdd;
@@ -517,10 +513,7 @@ void fts_execute_autotune(struct fts_ts_info *info)
 	bool bFinalAFE = false;
 	bool NoNeedAutoTune = false; // default for factory
 	bFinalAFE = get_AFE_status(info);
-
-#if !defined (CONFIG_SEC_FACTORY)
-	 NoNeedAutoTune = get_PureAutotune_status(info);  // Check flag and decide cx_tune
-#endif
+	NoNeedAutoTune = get_PureAutotune_status(info);	// Check flag and decide cx_tune
 
 	tsp_debug_info(true, info->dev, "%s: AFE(%d), NoNeedAutoTune(%d)\n", __func__,bFinalAFE, NoNeedAutoTune);
 
@@ -552,20 +545,9 @@ void fts_execute_autotune(struct fts_ts_info *info)
 #endif
 		}
 #ifdef FTS_SUPPORT_PARTIAL_DOWNLOAD
-    }
+	}
 
 	if (bFinalAFE) {
-#ifdef CONFIG_SEC_FACTORY
-		tsp_debug_info(true, info->dev, "%s: AFE_status(%d) write ( C1 0E )\n", __func__,bFinalAFE);
-		regData[0] = 0xC1;
-		regData[1] = 0x0E;
-		ret = info->fts_write_reg(info, regData, 2);//write C1 0E
-		if (ret < 0)
-			tsp_debug_info(true, info->dev, "%s: Flash Back up PureAutotune Fail(Set)\n", __func__);
-
-		msleep(20);
-		fts_fw_wait_for_event(info, STATUS_EVENT_PURE_AUTOTUNE_FLAG_WRITE_FINISH);
-#else
 		if (NoNeedAutoTune && (info->o_afe_ver!=info->afe_ver))
 		{
 			tsp_debug_info(true, info->dev, "%s: AFE_status(%d) write ( C2 0E )\n", __func__,bFinalAFE);
@@ -574,11 +556,11 @@ void fts_execute_autotune(struct fts_ts_info *info)
 			ret = info->fts_write_reg(info, regData, 2);//Write C2 0E
 			if (ret < 0)
 				tsp_debug_info(true, info->dev, "%s: Flash Back up PureAutotune Fail(Clear)\n", __func__);
-
 			msleep(20);
-			fts_fw_wait_for_event(info, STATUS_EVENT_PURE_AUTOTUNE_FLAG_ERASE_FINISH);
+
+			if (info->stm_ver != STM_VER7)
+				fts_fw_wait_for_event(info, STATUS_EVENT_PURE_AUTOTUNE_FLAG_ERASE_FINISH);
 		}
-#endif
 	} else {
 		tsp_debug_info(true, info->dev, "%s: AFE_status(%d) write ( C2 0E )\n", __func__,bFinalAFE);
 		regData[0] = 0xC2;
@@ -586,9 +568,10 @@ void fts_execute_autotune(struct fts_ts_info *info)
 		ret = info->fts_write_reg(info, regData, 2);//Write C2 0E
 		if (ret < 0)
 			tsp_debug_info(true, info->dev, "%s: Flash Back up PureAutotune Fail(Clear)\n", __func__);
-
 		msleep(20);
-		fts_fw_wait_for_event(info, STATUS_EVENT_PURE_AUTOTUNE_FLAG_ERASE_FINISH);
+
+		if (info->stm_ver != STM_VER7)
+			fts_fw_wait_for_event(info, STATUS_EVENT_PURE_AUTOTUNE_FLAG_ERASE_FINISH);
 	}
 #endif
 
@@ -775,23 +758,6 @@ const int fts_fw_updater(struct fts_ts_info *info, unsigned char *fw_data)
 		}
 	}
 
-	/* set_tsp_test_result using backup data */
-	if (info->stm_ver == STM_VER7) {
-		struct fts_ts_test_result result;
-		retry = 0;
-		do {
-			result.data[0] = info->test_result.data[0];
-			fts_set_tsp_test_result(info);
-			fts_get_tsp_test_result(info);
-			retry++;
-		} while ((result.data[0] != info->test_result.data[0]) && (retry < 5));
-
-		if (retry >= 5) {
-			tsp_debug_err(true, info->dev, "%s: failed to set_tsp_test_result\n",
-				__func__);
-		}
-	}
-
 	return retval;
 }
 EXPORT_SYMBOL(fts_fw_updater);
@@ -899,6 +865,14 @@ int fts_fw_update_on_probe(struct fts_ts_info *info)
 		retval = fts_fw_updater(info, fw_data);
 	else
 		retval = FTS_NOT_ERROR;
+
+	/* if version is 0xFFFF, run force update */
+	if ((info->fw_main_version_of_ic == 0xFFFF) ||
+		(info->config_version_of_ic == 0xFFFF) ||
+		(info->fw_version_of_ic == 0xFFFF)) {
+		tsp_debug_err(true, info->dev, "%s: run force update for recovery\n", __func__);
+		retval = fts_fw_updater(info, fw_data);
+	}
 
 	if (fts_get_system_status(info, &SYS_STAT[0], &SYS_STAT[1]) >= 0)
 		if (SYS_STAT[0] != SYS_STAT[1]) {

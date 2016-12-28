@@ -69,10 +69,10 @@ static struct adreno_device device_3d0 = {
 		.name = DEVICE_3D0_NAME,
 		.id = KGSL_DEVICE_3D0,
 		.pwrctrl = {
-			.irq_name = KGSL_3D0_IRQ,
+			.irq_name = "kgsl_3d0_irq",
 		},
-		.iomemname = KGSL_3D0_REG_MEMORY,
-		.shadermemname = KGSL_3D0_SHADER_MEMORY,
+		.iomemname = "kgsl_3d0_reg_memory",
+		.shadermemname = "kgsl_3d0_shader_memory",
 		.ftbl = &adreno_functable,
 		.cmd_log = KGSL_LOG_LEVEL_DEFAULT,
 		.ctxt_log = KGSL_LOG_LEVEL_DEFAULT,
@@ -370,6 +370,19 @@ static struct platform_driver kgsl_iommu_platform_driver = {
 		.of_match_table = iommu_match_table,
 	}
 };
+
+static int __init kgsl_iommu_pdev_init(void)
+{
+	return platform_driver_register(&kgsl_iommu_platform_driver);
+}
+
+static void __exit kgsl_iommu_pdev_exit(void)
+{
+	platform_driver_unregister(&kgsl_iommu_platform_driver);
+}
+
+module_init(kgsl_iommu_pdev_init);
+module_exit(kgsl_iommu_pdev_exit);
 
 static int _get_counter(struct adreno_device *adreno_dev,
 		int group, int countable, unsigned int *lo,
@@ -808,20 +821,21 @@ static const struct of_device_id adreno_match_table[] = {
 	{}
 };
 
-static int adreno_of_parse_pwrlevels(struct device_node *node,
-	struct kgsl_device_platform_data *pdata)
+static int adreno_of_parse_pwrlevels(struct adreno_device *adreno_dev,
+		struct device_node *node)
 {
+	struct kgsl_device *device = &adreno_dev->dev;
+	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 	struct device_node *child;
-	int ret = -EINVAL;
 
-	pdata->num_levels = 0;
+	pwr->num_pwrlevels = 0;
 
 	for_each_child_of_node(node, child) {
 		unsigned int index;
 		struct kgsl_pwrlevel *level;
 
 		if (adreno_of_read_property(child, "reg", &index))
-			goto done;
+			return -EINVAL;
 
 		if (index >= KGSL_MAX_PWRLEVELS) {
 			KGSL_CORE_ERR("Pwrlevel index %d is out of range\n",
@@ -829,18 +843,18 @@ static int adreno_of_parse_pwrlevels(struct device_node *node,
 			continue;
 		}
 
-		if (index >= pdata->num_levels)
-			pdata->num_levels = index + 1;
+		if (index >= pwr->num_pwrlevels)
+			pwr->num_pwrlevels = index + 1;
 
-		level = &pdata->pwrlevel[index];
+		level = &pwr->pwrlevels[index];
 
 		if (adreno_of_read_property(child, "qcom,gpu-freq",
 			&level->gpu_freq))
-			goto done;
+			return -EINVAL;
 
 		if (adreno_of_read_property(child, "qcom,bus-freq",
 			&level->bus_freq))
-			goto done;
+			return -EINVAL;
 
 		if (of_property_read_u32(child, "qcom,bus-min",
 			&level->bus_min))
@@ -851,16 +865,31 @@ static int adreno_of_parse_pwrlevels(struct device_node *node,
 			level->bus_max = level->bus_freq;
 	}
 
-
-	ret = 0;
-done:
-	return ret;
-
+	return 0;
 }
-static int adreno_of_get_legacy_pwrlevels(struct device_node *parent,
-	struct kgsl_device_platform_data *pdata)
+
+
+static void adreno_of_get_initial_pwrlevel(struct adreno_device *adreno_dev,
+		struct device_node *node)
+{
+	struct kgsl_device *device = &adreno_dev->dev;
+	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+	int init_level = 1;
+
+	of_property_read_u32(node, "qcom,initial-pwrlevel", &init_level);
+
+	if (init_level < 0 || init_level > pwr->num_pwrlevels)
+		init_level = 1;
+
+	pwr->active_pwrlevel = init_level;
+	pwr->default_pwrlevel = init_level;
+}
+
+static int adreno_of_get_legacy_pwrlevels(struct adreno_device *adreno_dev,
+		struct device_node *parent)
 {
 	struct device_node *node;
+	int ret;
 
 	node = of_find_node_by_name(parent, "qcom,gpu-pwrlevels");
 
@@ -869,18 +898,20 @@ static int adreno_of_get_legacy_pwrlevels(struct device_node *parent,
 		return -EINVAL;
 	}
 
-	return adreno_of_parse_pwrlevels(node, pdata);
+	ret = adreno_of_parse_pwrlevels(adreno_dev, node);
+	if (ret == 0)
+		adreno_of_get_initial_pwrlevel(adreno_dev, parent);
+	return ret;
 }
 
-static int adreno_of_get_pwrlevels(struct device_node *parent,
-		struct adreno_device *adreno_dev,
-		struct kgsl_device_platform_data *pdata)
+static int adreno_of_get_pwrlevels(struct adreno_device *adreno_dev,
+		struct device_node *parent)
 {
 	struct device_node *node, *child;
 
 	node = of_find_node_by_name(parent, "qcom,gpu-pwrlevel-bins");
 	if (node == NULL)
-		return adreno_of_get_legacy_pwrlevels(parent, pdata);
+		return adreno_of_get_legacy_pwrlevels(adreno_dev, parent);
 
 	for_each_child_of_node(node, child) {
 		unsigned int bin;
@@ -888,8 +919,15 @@ static int adreno_of_get_pwrlevels(struct device_node *parent,
 		if (of_property_read_u32(child, "qcom,speed-bin", &bin))
 			continue;
 
-		if (bin == adreno_dev->speed_bin)
-			return adreno_of_parse_pwrlevels(child, pdata);
+		if (bin == adreno_dev->speed_bin) {
+			int ret;
+
+			ret = adreno_of_parse_pwrlevels(adreno_dev, child);
+			if (ret == 0)
+				adreno_of_get_initial_pwrlevel(adreno_dev,
+								child);
+			return ret;
+		}
 	}
 
 	return -ENODEV;
@@ -910,95 +948,55 @@ static struct {
 	 { ADRENO_QUIRK_TWO_PASS_USE_WFI, "qcom,gpu-quirk-two-pass-use-wfi" },
 };
 
-static int adreno_of_get_pdata(struct adreno_device *adreno_dev)
+static int adreno_of_get_power(struct adreno_device *adreno_dev,
+		struct platform_device *pdev)
 {
-	struct platform_device *pdev = adreno_dev->dev.pdev;
-	struct kgsl_device_platform_data *pdata = NULL;
-	int ret = -EINVAL;
+	struct kgsl_device *device = &adreno_dev->dev;
+	struct device_node *node = pdev->dev.of_node;
 	int i;
 
-	if (of_property_read_string(pdev->dev.of_node, "label", &pdev->name)) {
+	if (of_property_read_string(node, "label", &pdev->name)) {
 		KGSL_CORE_ERR("Unable to read 'label'\n");
-		goto err;
+		return -EINVAL;
 	}
 
-	if (adreno_of_read_property(pdev->dev.of_node, "qcom,id", &pdev->id))
-		goto err;
-
-	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
-	if (pdata == NULL) {
-		ret = -ENOMEM;
-		goto err;
-	}
+	if (adreno_of_read_property(node, "qcom,id", &pdev->id))
+		return -EINVAL;
 
 	/* Set up quirks and other boolean options */
-
 	for (i = 0; i < ARRAY_SIZE(adreno_quirks); i++) {
-		if (of_property_read_bool(pdev->dev.of_node,
-			adreno_quirks[i].prop))
+		if (of_property_read_bool(node, adreno_quirks[i].prop))
 			adreno_dev->quirks |= adreno_quirks[i].quirk;
 	}
 
-	/* pwrlevel Data */
-	ret = adreno_of_get_pwrlevels(pdev->dev.of_node, adreno_dev, pdata);
-	if (ret)
-		goto err;
-
-	if (of_property_read_u32(pdev->dev.of_node, "qcom,initial-pwrlevel",
-		&pdata->init_level))
-		pdata->init_level = 1;
-
-	if (pdata->init_level < 0 || pdata->init_level > pdata->num_levels) {
-		KGSL_CORE_ERR("Initial power level out of range\n");
-		pdata->init_level = 1;
-	}
+	if (adreno_of_get_pwrlevels(adreno_dev, node))
+		return -EINVAL;
 
 	/* get pm-qos-active-latency, set it to default if not found */
-	if (of_property_read_u32(pdev->dev.of_node,
-		"qcom,pm-qos-active-latency",
-		&pdata->pm_qos_active_latency))
-		pdata->pm_qos_active_latency = 501;
+	if (of_property_read_u32(node, "qcom,pm-qos-active-latency",
+		&device->pwrctrl.pm_qos_active_latency))
+		device->pwrctrl.pm_qos_active_latency = 501;
 
 	/* get pm-qos-wakeup-latency, set it to default if not found */
-	if (of_property_read_u32(pdev->dev.of_node,
-		"qcom,pm-qos-wakeup-latency",
-		&pdata->pm_qos_wakeup_latency))
-		pdata->pm_qos_wakeup_latency = 101;
+	if (of_property_read_u32(node, "qcom,pm-qos-wakeup-latency",
+		&device->pwrctrl.pm_qos_wakeup_latency))
+		device->pwrctrl.pm_qos_wakeup_latency = 101;
 
-	if (of_property_read_u32(pdev->dev.of_node, "qcom,idle-timeout",
-		&pdata->idle_timeout))
-		pdata->idle_timeout = HZ/12;
+	if (of_property_read_u32(node, "qcom,idle-timeout",
+		(unsigned int *) &device->pwrctrl.interval_timeout))
+		device->pwrctrl.interval_timeout = HZ/12;
 
-	pdata->strtstp_sleepwake = of_property_read_bool(pdev->dev.of_node,
-						"qcom,strtstp-sleepwake");
+	device->pwrctrl.strtstp_sleepwake =
+		of_property_read_bool(node, "qcom,strtstp-sleepwake");
 
-	pdata->bus_control = of_property_read_bool(pdev->dev.of_node,
-						"qcom,bus-control");
+	device->pwrctrl.bus_control = of_property_read_bool(node,
+		"qcom,bus-control");
 
-	if (adreno_of_read_property(pdev->dev.of_node, "qcom,clk-map",
-		&pdata->clk_map))
-		goto err;
+	if (adreno_of_read_property(node, "qcom,clk-map",
+		&device->pwrctrl.clk_map))
+		return -EINVAL;
 
-	/* Bus Scale Data */
-
-	pdata->bus_scale_table = msm_bus_cl_get_pdata(pdev);
-	if (IS_ERR_OR_NULL(pdata->bus_scale_table)) {
-		ret = PTR_ERR(pdata->bus_scale_table);
-		if (!ret)
-			ret = -EINVAL;
-		goto err;
-	}
-
-	pdata->coresight_pdata = of_get_coresight_platform_data(&pdev->dev,
-			pdev->dev.of_node);
-
-	pdev->dev.platform_data = pdata;
 	return 0;
-
-err:
-	kfree(pdata);
-
-	return ret;
 }
 
 #ifdef CONFIG_MSM_OCMEM
@@ -1068,8 +1066,7 @@ static int adreno_probe(struct platform_device *pdev)
 	/* Get the chip ID from the DT and set up target specific parameters */
 	adreno_identify_gpu(adreno_dev);
 
-	/* Get the rest of the device tree */
-	status = adreno_of_get_pdata(adreno_dev);
+	status = adreno_of_get_power(adreno_dev, pdev);
 	if (status) {
 		device->pdev = NULL;
 		return status;
@@ -1286,6 +1283,9 @@ static int adreno_init(struct kgsl_device *device)
 	else if ((adreno_is_a405(adreno_dev)) || (adreno_is_a420(adreno_dev)))
 		adreno_a4xx_pwron_fixup_init(adreno_dev);
 
+	if (gpudev->init != NULL)
+		gpudev->init(adreno_dev);
+
 	set_bit(ADRENO_DEVICE_INITIALIZED, &adreno_dev->priv);
 
 	/* Use shader offset and length defined in gpudev */
@@ -1348,8 +1348,6 @@ static int adreno_init(struct kgsl_device *device)
 			WARN(1, "adreno: GPU preemption is disabled\n");
 	}
 
-	if (gpudev->cp_crash_dumper_init)
-		gpudev->cp_crash_dumper_init(adreno_dev);
 	return 0;
 }
 
@@ -1808,16 +1806,6 @@ static int adreno_getproperty(struct kgsl_device *device,
 				break;
 			}
 			if (copy_to_user(value, &int_waits, sizeof(int))) {
-				status = -EFAULT;
-				break;
-			}
-			status = 0;
-		}
-		break;
-	case KGSL_PROP_UNKNOWN:
-		{
-			int val = 0;
-			if (copy_to_user(value, &val, sizeof(int))) {
 				status = -EFAULT;
 				break;
 			}
@@ -2808,6 +2796,20 @@ static struct platform_driver adreno_platform_driver = {
 	}
 };
 
+static int __init kgsl_3d_init(void)
+{
+	return platform_driver_register(&adreno_platform_driver);
+}
+
+static void __exit kgsl_3d_exit(void)
+{
+	platform_driver_unregister(&adreno_platform_driver);
+}
+
+module_init(kgsl_3d_init);
+module_exit(kgsl_3d_exit);
+
+
 static struct of_device_id busmon_match_table[] = {
 	{ .compatible = "qcom,kgsl-busmon", .data = &device_3d0 },
 	{}
@@ -2838,60 +2840,18 @@ static struct platform_driver kgsl_bus_platform_driver = {
 	}
 };
 
-#if defined(CONFIG_ARM_SMMU) || defined(CONFIG_MSM_IOMMU)
-static int kgsl_iommu_driver_register(void)
+static int __init kgsl_busmon_init(void)
 {
-	return platform_driver_register(&kgsl_iommu_platform_driver);
+	return platform_driver_register(&kgsl_bus_platform_driver);
 }
 
-static void kgsl_iommu_driver_unregister(void)
+static void __exit kgsl_busmon_exit(void)
 {
-	platform_driver_unregister(&kgsl_iommu_platform_driver);
-}
-#else
-static inline int kgsl_iommu_driver_register(void)
-{
-	return 0;
-}
-
-static inline void kgsl_iommu_driver_unregister(void)
-{
-}
-#endif
-
-static int __init kgsl_3d_init(void)
-{
-	int ret;
-
-	ret = platform_driver_register(&kgsl_bus_platform_driver);
-	if (ret)
-		return ret;
-
-	ret = kgsl_iommu_driver_register();
-	if (ret) {
-		platform_driver_unregister(&kgsl_bus_platform_driver);
-		return ret;
-	}
-
-	ret = platform_driver_register(&adreno_platform_driver);
-	if (ret) {
-		kgsl_iommu_driver_unregister();
-		platform_driver_unregister(&kgsl_bus_platform_driver);
-	}
-
-	return ret;
-}
-
-static void __exit kgsl_3d_exit(void)
-{
-	platform_driver_unregister(&adreno_platform_driver);
-	kgsl_iommu_driver_unregister();
 	platform_driver_unregister(&kgsl_bus_platform_driver);
-
 }
 
-module_init(kgsl_3d_init);
-module_exit(kgsl_3d_exit);
+module_init(kgsl_busmon_init);
+module_exit(kgsl_busmon_exit);
 
 MODULE_DESCRIPTION("3D Graphics driver");
 MODULE_VERSION("1.2");

@@ -95,14 +95,8 @@ static int __init fingerprint_class_init(void)
 	fingerprint_class = class_create(THIS_MODULE, "fingerprint");
 
 	if (IS_ERR(fingerprint_class)) {
-#if 0
-		/* To do fix: build error */
-		pr_err("%s, create fingerprint_class is failed.(err=%ld)\n",
+		pr_err("%s, create fingerprint_class is failed.(err=%d)\n",
 			__func__, IS_ERR(fingerprint_class));
-#else
-		pr_err("%s, create fingerprint_class is failed.\n",
-			__func__);
-#endif
 		return PTR_ERR(fingerprint_class);
 	}
 

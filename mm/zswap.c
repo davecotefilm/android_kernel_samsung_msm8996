@@ -96,11 +96,7 @@ static bool zswap_enabled __read_mostly = 1;
 module_param_named(enabled, zswap_enabled, bool, 0444);
 
 /* Compressor to be used by zswap (fixed at boot for now) */
-#ifdef CONFIG_ZSWAP_LZ4_COMPRESS 
-#define ZSWAP_COMPRESSOR_DEFAULT "lz4"; 
-#else 
-#define ZSWAP_COMPRESSOR_DEFAULT "lzo"; 
-#endif 
+#define ZSWAP_COMPRESSOR_DEFAULT "lzo"
 static char *zswap_compressor = ZSWAP_COMPRESSOR_DEFAULT;
 module_param_named(compressor, zswap_compressor, charp, 0444);
 

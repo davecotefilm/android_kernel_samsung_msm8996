@@ -562,6 +562,13 @@ config LEDS_S2MPB02
 	help
 	  This option enables support for the LEDs on the S2MPB02.
 
+config SAMSUNG_SECURE_CAMERA
+        tristate "Flash current for Secure camera"
+        depends on LEDS_CLASS
+        default n
+        help
+        Enables support for flash current for secure camera
+
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"
 

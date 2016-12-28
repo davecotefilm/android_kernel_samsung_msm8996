@@ -34,7 +34,12 @@ enum {
 	ADSP_FACTORY_GYRO_TEMP,
 	ADSP_FACTORY_ACCEL_LPF_ON, //12
 	ADSP_FACTORY_ACCEL_LPF_OFF, //13
+#ifdef CONFIG_SLPI_MOTOR
+	ADSP_FACTORY_ACCEL_MOTOR_ON, //14
+	ADSP_FACTORY_ACCEL_MOTOR_OFF, //15
+#endif
 	ADSP_FACTORY_SSC_CORE,
+	ADSP_FACTORY_HH_HOLE,
 	ADSP_FACTORY_SENSOR_MAX
 };
 
@@ -65,11 +70,24 @@ enum {
 	NETLINK_MESSAGE_MOBEAM_START,
 	NETLINK_MESSAGE_MOBEAM_SEND_DATA,
 	NETLINK_MESSAGE_MOBEAM_SEND_COUNT,
-	NETLINK_MESSAGE_MOBEAM_SEND_REG,
+	NETLINK_MESSAGE_MOBEAM_SEND_REG, //20
 	NETLINK_MESSAGE_MOBEAM_STOP,
 	NETLINK_MESSAGE_DUMPSTATE,
 	NETLINK_MESSAGE_THD_HI_STORE_DATA,
 	NETLINK_MESSAGE_THD_LO_STORE_DATA,
+#ifdef CONFIG_SUPPORT_PROX_AUTO_CAL
+	NETLINK_MESSAGE_THD_DETECT_HI_STORE_DATA,
+	NETLINK_MESSAGE_THD_DETECT_LO_STORE_DATA,
+#endif
+#ifdef CONFIG_SUPPORT_HIDDEN_HOLE
+	NETLINK_MESSAGE_HIDDEN_HOLE_READ_DATA,
+	NETLINK_MESSAGE_HIDDEN_HOLE_WRITE_DATA,
+	NETLINK_MESSAGE_HIDDEN_HOLE_CHANGE_OWNER,
+#endif
+#ifdef CONFIG_SLPI_MOTOR
+	NETLINK_MESSAGE_ACCEL_MOTOR_ON,
+	NETLINK_MESSAGE_ACCEL_MOTOR_OFF,
+#endif
 	NETLINK_MESSAGE_MAX
 };
 
@@ -79,6 +97,21 @@ struct msg_data {
 	int param2;
 	int param3;
 };
+
+#ifdef CONFIG_SUPPORT_HIDDEN_HOLE
+struct msg_data_hidden_hole {
+	int sensor_type;
+	int d_factor;
+	int r_coef;
+	int g_coef;
+	int b_coef;
+	int c_coef;
+	int ct_coef;
+	int ct_offset;
+	int th_high;
+	int th_low;	
+};
+#endif
 
 struct msg_big_data {
 	int sensor_type;
@@ -106,7 +139,14 @@ struct sensor_value {
 			short a_time;
 			short a_gain;
 		};
+#ifdef CONFIG_SUPPORT_PROX_AUTO_CAL		
+		struct {
+			short prox;
+			short offset;
+		};
+#else
 		short prox;
+#endif
 		short reactive_alert;
 		short temperature;
 		int pressure_cal;
@@ -138,6 +178,10 @@ struct sensor_calib_value {
 			int threHi;
 			int cal_done;
 			int trim;
+#ifdef CONFIG_SUPPORT_PROX_AUTO_CAL
+			int threDetectLo;
+			int threDetectHi;
+#endif
 		};
 	};
 	int result;
@@ -213,6 +257,21 @@ struct sensor_selftest_show_result {
 	int ohz;
 	int gyro_temp;
 };
+
+#ifdef CONFIG_SUPPORT_HIDDEN_HOLE
+struct hidden_hole_data {
+	int d_factor;
+	int r_coef;
+	int g_coef;
+	int b_coef;
+	int c_coef;
+	int ct_coef;
+	int ct_offset;
+	int th_high;
+	int th_low;
+	int sum_crc;
+};
+#endif
 
 struct sensor_status {
 	unsigned char sensor_type;

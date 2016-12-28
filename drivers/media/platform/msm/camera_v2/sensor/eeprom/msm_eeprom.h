@@ -38,6 +38,10 @@ struct msm_eeprom_ctrl_t;
 
 #define FROM_SENSOR_ID_SIZE 16
 
+/* Module ID : 0x00A8~0x00B7(16Byte) for FROM, EEPROM (Don't support OTP)*/
+#define FROM_MODULE_ID_ADDR           0x00AE
+#define FROM_MODULE_ID_SIZE           10
+
 struct msm_eeprom_ctrl_t {
 	struct platform_device *pdev;
 	struct mutex *eeprom_mutex;

@@ -2603,6 +2603,56 @@ static void arm_smmu_remove_device(struct device *dev)
 	iommu_group_remove_device(dev);
 }
 
+/* how many pages to allocate/assign during page table warming */
+#define PGTBL_WARM_NUM_PAGES 90
+
+static void arm_smmu_warm_tables(struct arm_smmu_domain *smmu_domain)
+{
+	int i;
+	void *virt[PGTBL_WARM_NUM_PAGES];
+	u32 vmid = smmu_domain->secure_vmid;
+
+	BUG_ON(vmid == VMID_INVAL);
+
+	if (vmid != VMID_CP_CAMERA) {
+		pr_debug("Skipping page table warming for %s\n",
+			 msm_secure_vmid_to_string(vmid));
+		return;
+	}
+
+	for (i = 0; i < PGTBL_WARM_NUM_PAGES; ++i) {
+		/*
+		 * Unfortunately, pooled memory is tracked by requested
+		 * size, even though whole pages are actually allocated at
+		 * at time.  The allocation for the pgd is only 0x20 in
+		 * size, while the rest are all PAGE_SIZE.  Hence the
+		 * single 0x20 allocation per domain.
+		 */
+		size_t sz = i == 0 ? 0x20 : PAGE_SIZE;
+
+		virt[i] = arm_smmu_alloc_pages_exact(smmu_domain, sz,
+						     GFP_KERNEL);
+		if (WARN_ON(!virt[i]))
+			return;
+	}
+
+	if (arm_smmu_assign_table(smmu_domain)) {
+		WARN(1, "Couldn't assign while warming %p vmid: %s\n",
+		     smmu_domain, msm_secure_vmid_to_string(vmid));
+		return;
+	}
+
+	/*
+	 * Free everything we just allocated. These will go straight into
+	 * our pool.
+	 */
+	for (i = 0; i < PGTBL_WARM_NUM_PAGES; ++i) {
+		size_t sz = i == 0 ? 0x20 : PAGE_SIZE;
+
+		arm_smmu_free_pages_exact(smmu_domain, virt[i], sz);
+	}
+}
+
 static int arm_smmu_domain_get_attr(struct iommu_domain *domain,
 				    enum iommu_attr attr, void *data)
 {
@@ -2721,6 +2771,7 @@ static int arm_smmu_domain_set_attr(struct iommu_domain *domain,
 	case DOMAIN_ATTR_SECURE_VMID:
 		BUG_ON(smmu_domain->secure_vmid != VMID_INVAL);
 		smmu_domain->secure_vmid = *((int *)data);
+		arm_smmu_warm_tables(smmu_domain);
 		break;
 	case DOMAIN_ATTR_ATOMIC:
 	{

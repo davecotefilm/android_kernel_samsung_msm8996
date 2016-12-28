@@ -698,7 +698,8 @@ static void __cpufreq_interactive_timer(unsigned long data, bool is_notif)
 			jump_to_max = true;
 		}
 #ifdef CONFIG_MODE_AUTO_CHANGE
-	now = update_load(i);
+		now = update_load(i);
+		trace_cpufreq_interactive_cpuutil(i, per_cpu(cpu_util, i), cpu_load);
 #endif
 	}
 	spin_unlock(&ppol->load_lock);

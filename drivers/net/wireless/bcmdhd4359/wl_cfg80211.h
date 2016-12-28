@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: wl_cfg80211.h 611070 2016-01-08 14:42:18Z $
+ * $Id: wl_cfg80211.h 644974 2016-06-22 04:54:25Z $
  */
 
 /**
@@ -589,6 +589,20 @@ typedef struct wl_if_event_info {
 #define GET_BSS_INFO_LEN 90
 #endif /* DHD_ENABLE_BIGDATA_LOGGING */
 
+#ifdef WES_SUPPORT
+#ifdef CUSTOMER_SCAN_TIMEOUT_SETTING
+#define CUSTOMER_WL_SCAN_TIMER_INTERVAL_MS	25000 /* Scan timeout */
+enum wl_custom_scan_time_type {
+	WL_CUSTOM_SCAN_CHANNEL_TIME = 0,
+	WL_CUSTOM_SCAN_UNASSOC_TIME,
+	WL_CUSTOM_SCAN_PASSIVE_TIME,
+	WL_CUSTOM_SCAN_HOME_TIME,
+	WL_CUSTOM_SCAN_HOME_AWAY_TIME
+};
+extern s32 wl_cfg80211_custom_scan_time(enum wl_custom_scan_time_type type, int time);
+#endif /* CUSTOMER_SCAN_TIMEOUT_SETTING */
+#endif /* WES_SUPPORT */
+
 /* private data of cfg80211 interface */
 struct bcm_cfg80211 {
 	struct wireless_dev *wdev;	/* representing cfg cfg80211 device */
@@ -704,6 +718,8 @@ struct bcm_cfg80211 {
 	bool disable_roam_event;
 	struct delayed_work pm_enable_work;
 	struct mutex pm_sync;	/* mainly for pm work synchronization */
+	struct workqueue_struct *event_workq;   /* workqueue for event */
+	struct work_struct event_work;		/* work item for event */
 
 	vndr_ie_setbuf_t *ibss_vsie;	/* keep the VSIE for IBSS */
 	int ibss_vsie_len;
@@ -764,6 +780,18 @@ struct bcm_cfg80211 {
 	uint8 *bip_pos;
 	int mfp_mode;
 #endif /* MFP */
+#ifdef WES_SUPPORT
+#ifdef CUSTOMER_SCAN_TIMEOUT_SETTING
+	int custom_scan_channel_time;
+	int custom_scan_unassoc_time;
+	int custom_scan_passive_time;
+	int custom_scan_home_time;
+	int custom_scan_home_away_time;
+#endif /* CUSTOMER_SCAN_TIMEOUT_SETTING */
+#endif /* WES_SUPPORT */
+#ifdef DYNAMIC_MUMIMO_CONTROL
+	uint8 reassoc_mumimo_sw;
+#endif /* DYNAMIC_MUMIMO_CONTROL */
 };
 
 #if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == \
@@ -1288,16 +1316,16 @@ wl_get_netinfo_by_wdev(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev)
 #elif defined(WLAN_AKM_SUITE_FT_PSK)
 #define IS_AKM_SUITE_FT(sec) (sec->wpa_auth == WLAN_AKM_SUITE_FT_PSK)
 #else
-#define IS_AKM_SUITE_FT(sec) false
+#define IS_AKM_SUITE_FT(sec) ({BCM_REFERENCE(sec); FALSE;})
 #endif /* WLAN_AKM_SUITE_FT_8021X && WLAN_AKM_SUITE_FT_PSK */
 #else
-#define IS_AKM_SUITE_FT(sec) false
+#define IS_AKM_SUITE_FT(sec) ({BCM_REFERENCE(sec); FALSE;})
 #endif /* WLFBT */
 
 #ifdef BCMCCX
 #define IS_AKM_SUITE_CCKM(sec) (sec->wpa_auth == WLAN_AKM_SUITE_CCKM)
 #else
-#define IS_AKM_SUITE_CCKM(sec) false
+#define IS_AKM_SUITE_CCKM(sec) ({BCM_REFERENCE(sec); FALSE;})
 #endif /* BCMCCX */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0))
@@ -1343,6 +1371,7 @@ extern s32 wl_cfg80211_set_wps_p2p_ie(struct net_device *net, char *buf, int len
 	enum wl_management_type type);
 extern s32 wl_cfg80211_set_p2p_ps(struct net_device *net, char* buf, int len);
 extern s32 wl_cfg80211_set_p2p_ecsa(struct net_device *net, char* buf, int len);
+extern s32 wl_cfg80211_increase_p2p_bw(struct net_device *net, char* buf, int len);
 #ifdef WL11ULB
 extern s32 wl_cfg80211_set_ulb_mode(struct net_device *dev, int mode);
 extern s32 wl_cfg80211_set_ulb_bw(struct net_device *dev,
@@ -1488,6 +1517,8 @@ extern int wl_cfg80211_get_ioctl_version(void);
 extern int wl_cfg80211_enable_roam_offload(struct net_device *dev, int enable);
 extern s32 wl_cfg80211_dfs_ap_move(struct net_device *ndev, char *data,
 		char *command, int total_len);
+#ifdef WBTEXT
+extern s32 wl_cfg80211_wbtext_set_default(struct net_device *ndev);
 extern s32 wl_cfg80211_wbtext_config(struct net_device *ndev, char *data,
 		char *command, int total_len);
 extern int wl_cfg80211_wbtext_weight_config(struct net_device *ndev, char *data,
@@ -1496,6 +1527,7 @@ extern int wl_cfg80211_wbtext_table_config(struct net_device *ndev, char *data,
 		char *command, int total_len);
 extern s32 wl_cfg80211_wbtext_delta_config(struct net_device *ndev, char *data,
 		char *command, int total_len);
+#endif /* WBTEXT */
 extern s32 wl_cfg80211_get_chanspecs_2g(struct net_device *ndev,
 		void *buf, s32 buflen);
 extern s32 wl_cfg80211_get_chanspecs_5g(struct net_device *ndev,
@@ -1503,6 +1535,9 @@ extern s32 wl_cfg80211_get_chanspecs_5g(struct net_device *ndev,
 #if defined(WL_VIRTUAL_APSTA)
 extern int wl_cfg80211_interface_create(struct net_device *dev, char *name);
 extern int wl_cfg80211_interface_delete(struct net_device *dev, char *name);
+#if defined(PKT_FILTER_SUPPORT) && defined(APSTA_BLOCK_ARP_DURING_DHCP)
+extern void wl_cfg80211_block_arp(struct net_device *dev, int enable);
+#endif /* PKT_FILTER_SUPPORT && APSTA_BLOCK_ARP_DURING_DHCP */
 #endif /* defined (WL_VIRTUAL_APSTA) */
 
 #ifdef WL_NAN
@@ -1540,10 +1575,15 @@ extern uint8 *wl_get_up_table(void);
 #define P2PO_COOKIE     65535
 u64 wl_cfg80211_get_new_roc_id(struct bcm_cfg80211 *cfg);
 #if defined(SUPPORT_RANDOM_MAC_SCAN)
-int wl_cfg80211_set_random_mac(struct net_device *dev, bool enable);
-int wl_cfg80211_random_mac_enable(struct net_device *dev);
-int wl_cfg80211_random_mac_disable(struct net_device *dev);
+int wl_cfg80211_set_random_mac(bool enable);
+int wl_cfg80211_random_mac_enable(void);
+int wl_cfg80211_random_mac_disable(void);
 #endif /* SUPPORT_RANDOM_MAC_SCAN */
 int wl_cfg80211_iface_count(void);
 int wl_check_dongle_idle(struct wiphy *wiphy);
+#ifdef DYNAMIC_MUMIMO_CONTROL
+int wl_check_bss_support_mumimo(struct net_device *dev);
+int wl_get_murx_bfe_cap(struct net_device *dev, int *cap);
+int wl_set_murx_bfe_cap(struct net_device *dev, int val);
+#endif /* DYNAMIC_MUMIMO_CONTROL */
 #endif /* _wl_cfg80211_h_ */

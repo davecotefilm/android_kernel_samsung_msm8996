@@ -1029,8 +1029,8 @@ static void  mdss_panel_init(struct samsung_display_driver_data *vdd)
 	/* A3 line panel data parsing fn */
 	vdd->panel_func.parsing_otherline_pdata = NULL;
 
-	/* send 2c short pck before sending image date to reset DE (only for HA3 ddi) */
-	vdd->send_2c_cmd = false;
+	/* send recovery pck before sending image date (for ESD recovery) */
+	vdd->send_esd_recovery = false;
 
 	dsi_update_mdnie_data();
 }

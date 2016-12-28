@@ -6,6 +6,9 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  */
+
+  /* usb notify layer v2.0 */
+
 #ifndef __LINUX_USB_NOTIFY_SYSFS_H__
 #define __LINUX_USB_NOTIFY_SYSFS_H__
 
@@ -26,3 +29,4 @@ extern void usb_notify_dev_unregister(struct usb_notify_dev *ndev);
 extern int usb_notify_class_init(void);
 extern void usb_notify_class_exit(void);
 #endif
+

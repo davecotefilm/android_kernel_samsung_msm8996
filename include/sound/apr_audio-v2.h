@@ -2544,6 +2544,9 @@ struct afe_lpass_core_shared_clk_config_command {
 #define VPM_TX_SM_LVVEFQ_COPP_TOPOLOGY      0x1000BFF0
 #define VPM_TX_DM_LVVEFQ_COPP_TOPOLOGY      0x1000BFF1
 #define VPM_TX_SM_LVSAFQ_COPP_TOPOLOGY      0x1000BFF4
+/* Fotemeia */
+#define VOICE_TX_DIAMONDVOICE_FVSAM_DM      0x1000110A
+#define VOICE_TX_DIAMONDVOICE_FVSAM_QM      0x10001109
 #endif /* CONFIG_SEC_VOC_SOLUTION */
 
 /* Memory map regions command payload used by the
@@ -7736,6 +7739,7 @@ struct asm_stream_cmd_set_pp_params_sa {
 	int16_t reserved;
 	int32_t m3DPositionAngle[2];
 	int32_t m3DPositionGain[2];
+	int32_t AHDRonoff;
 } __packed;
 
 struct asm_stream_cmd_set_pp_params_vsp {

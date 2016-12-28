@@ -31,6 +31,13 @@
 #define CREATE_TRACE_POINTS
 #include "trace/sync.h"
 
+extern void mdss_xlog_tout_handler_default(bool queue, const char *name, ...);
+
+#define XLOG_TOUT_DATA_LIMITER (NULL)
+#define MDSS_XLOG_TOUT_HANDLER_EXT(...) \
+	mdss_xlog_tout_handler_default(false, __func__, ##__VA_ARGS__, \
+	XLOG_TOUT_DATA_LIMITER)
+
 static const struct fence_ops android_fence_ops;
 static const struct file_operations sync_fence_fops;
 
@@ -393,6 +400,8 @@ int sync_fence_wait(struct sync_fence *fence, long timeout)
 			pr_info("fence timeout on [%p] after %dms\n", fence,
 				jiffies_to_msecs(timeout));
 			sync_dump();
+			if(timeout == 1234)
+				MDSS_XLOG_TOUT_HANDLER_EXT("panic");
 		}
 		return -ETIME;
 	}

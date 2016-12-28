@@ -38,12 +38,19 @@
 
 extern unsigned int system_rev;
 
-static struct mfd_cell s2mpb02_devs[] = {
+static struct mfd_cell *s2mpb02_devs;
+
+static struct mfd_cell s2mpb02_default_devs[] = {
 #if defined(CONFIG_LEDS_S2MPB02)
 	{ .name = "s2mpb02-led", },
 #endif /* CONFIG_LEDS_S2MPB02 */
 	{ .name = "s2mpb02-regulator", },
 };
+#if defined(CONFIG_LEDS_S2MPB02)
+unsigned int s2mpb02_devs_num = 2;
+#else
+unsigned int s2mpb02_devs_num = 1;
+#endif
 
 int s2mpb02_read_reg(struct i2c_client *i2c, u8 reg, u8 *dest)
 {
@@ -196,14 +203,45 @@ static int s2mpb02_i2c_pinctrl_select(struct s2mpb02_dev *s2mpb02, bool on)
 static int of_s2mpb02_dt(struct device *dev, struct s2mpb02_platform_data *pdata)
 {
 	struct device_node *np_s2mpb02 = dev->of_node;
+	int count = 0;
+	int i, ret;
 
 	if(!np_s2mpb02)
 		return -EINVAL;
 
+	pr_info("%s: get dt data from %s\n", __func__, np_s2mpb02->full_name);
+	
 	pdata->irq_gpio = of_get_named_gpio(np_s2mpb02, "s2mpb02,irq-gpio", 0);
 	pdata->wakeup = of_property_read_bool(np_s2mpb02, "s2mpb02,wakeup");
 
+	count = of_property_count_strings(np_s2mpb02, "s2mpb02,mfd-cell");
+	if (!count || (count == -EINVAL)) {
+		pr_err("%s: use default mfd cells\n", __func__);
+		s2mpb02_devs = s2mpb02_default_devs;
+	}
+	else
+	{
+		s2mpb02_devs_num = count;
+
+		s2mpb02_devs = kzalloc(sizeof(struct mfd_cell) * count, GFP_KERNEL);
+		if (!s2mpb02_devs) {
+			pr_err("%s failed %d\n", __func__, __LINE__);
+			return -ENOMEM;
+		}
+		for (i = 0; i < s2mpb02_devs_num; i++) {
+			ret = of_property_read_string_index(np_s2mpb02, "s2mpb02,mfd-cell", i, &s2mpb02_devs[i].name);
+			pr_info("%s mfd-cell(%d) = %s\n", __func__, i, s2mpb02_devs[i].name);
+			if (ret < 0) {
+				pr_err("%s failed %d\n", __func__, __LINE__);
+				goto error_mfd_cell;
+			}
+		}
+	}
 	return 0;
+
+error_mfd_cell:
+	kfree(s2mpb02_devs);
+	return ret;
 }
 #else
 static int of_s2mpb02_dt(struct device *dev, struct s2mpb02_platform_data *pdata)
@@ -296,7 +334,7 @@ static int s2mpb02_i2c_probe(struct i2c_client *i2c,
 #endif
 
 	ret = mfd_add_devices(s2mpb02->dev, -1, s2mpb02_devs,
-			ARRAY_SIZE(s2mpb02_devs), NULL, 0, NULL);
+			s2mpb02_devs_num, NULL, 0, NULL);
 	if (ret < 0)
 		goto err_mfd;
 

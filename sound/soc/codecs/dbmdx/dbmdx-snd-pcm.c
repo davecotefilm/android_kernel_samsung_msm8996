@@ -21,6 +21,7 @@
 
 #define DEBUG
 
+#include <linux/workqueue.h>
 #include <linux/clk.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -68,9 +69,12 @@ struct snd_dbmdx_runtime_data {
 	struct snd_pcm_substream *substream;
 	struct timer_list *timer;
 	bool timer_is_active;
-	struct work_struct pcm_start_capture_work;
-	struct work_struct pcm_stop_capture_work;
+	struct delayed_work pcm_start_capture_work;
+	struct delayed_work pcm_stop_capture_work;
+	struct workqueue_struct		*dbmdx_pcm_workq;
 	unsigned int capture_in_progress;
+	atomic_t command_in_progress;
+	atomic_t number_of_cmds_in_progress;
 };
 
 static struct snd_pcm_hardware dbmdx_pcm_hardware = {
@@ -92,6 +96,37 @@ static struct snd_pcm_hardware dbmdx_pcm_hardware = {
 	.periods_max =		USE_PERIODS_MAX,
 	.fifo_size =		0,
 };
+
+static DECLARE_WAIT_QUEUE_HEAD(dbmdx_wq);
+
+int pcm_command_in_progress(struct snd_dbmdx_runtime_data *prtd,
+	bool is_command_in_progress)
+{
+	if (is_command_in_progress) {
+		if (!atomic_add_unless(&prtd->command_in_progress, 1, 1))
+			return -EBUSY;
+		} else {
+			atomic_set(&prtd->command_in_progress, 0);
+			atomic_dec(&prtd->number_of_cmds_in_progress);
+			wake_up_interruptible(&dbmdx_wq);
+		}
+
+		return 0;
+}
+
+void wait_for_pcm_commands(struct snd_dbmdx_runtime_data *prtd)
+{
+	int ret;
+
+	while (1) {
+		wait_event_interruptible(dbmdx_wq,
+			!(atomic_read(&prtd->command_in_progress)));
+
+		ret = pcm_command_in_progress(prtd, 1);
+		if (!ret)
+			break;
+	}
+}
 
 u32 stream_get_position(struct snd_pcm_substream *substream)
 {
@@ -303,16 +338,16 @@ static void  dbmdx_pcm_start_capture_work(struct work_struct *work)
 	int ret;
 	struct snd_dbmdx_runtime_data *prtd = container_of(
 			work, struct snd_dbmdx_runtime_data,
-			pcm_start_capture_work);
+			pcm_start_capture_work.work);
 	struct snd_pcm_substream *substream = prtd->substream;
 
 	pr_debug("%s:\n", __func__);
 
-	flush_work(&prtd->pcm_stop_capture_work);
+	wait_for_pcm_commands(prtd);
 
 	if (prtd->capture_in_progress) {
 		pr_debug("%s:Capture is already in progress\n", __func__);
-		return;
+		goto out;
 	}
 
 	prtd->capture_in_progress = 1;
@@ -321,7 +356,7 @@ static void  dbmdx_pcm_start_capture_work(struct work_struct *work)
 	if (ret < 0) {
 		prtd->capture_in_progress = 0;
 		pr_err("%s: failed to start capture device\n", __func__);
-		return;
+		goto out;
 	}
 #if 1
 	msleep(DBMDX_MSLEEP_PCM_STREAMING_WORK);
@@ -332,9 +367,11 @@ static void  dbmdx_pcm_start_capture_work(struct work_struct *work)
 		pr_err("%s: failed to start capture device\n", __func__);
 		prtd->capture_in_progress = 0;
 		dbmdx_stop_pcm_streaming();
-		return;
+		goto out;
 	}
 #endif
+out:
+	pcm_command_in_progress(prtd, 0);
 	return;
 }
 
@@ -343,12 +380,12 @@ static void dbmdx_pcm_stop_capture_work(struct work_struct *work)
 	int ret;
 	struct snd_dbmdx_runtime_data *prtd = container_of(
 			work, struct snd_dbmdx_runtime_data,
-			pcm_stop_capture_work);
+			pcm_stop_capture_work.work);
 	struct snd_pcm_substream *substream = prtd->substream;
 
 	pr_debug("%s:\n", __func__);
 
-	flush_work(&prtd->pcm_start_capture_work);
+	wait_for_pcm_commands(prtd);
 
 	if (!(prtd->capture_in_progress)) {
 		pr_debug("%s:Capture is not in progress\n", __func__);
@@ -367,6 +404,8 @@ static void dbmdx_pcm_stop_capture_work(struct work_struct *work)
 	}
 
 	prtd->capture_in_progress = 0;
+
+	pcm_command_in_progress(prtd, 0);
 
 	return;
 }
@@ -404,8 +443,19 @@ static int dbmdx_pcm_open(struct snd_pcm_substream *substream)
 	prtd->timer = timer;
 	prtd->substream = substream;
 
-	INIT_WORK(&prtd->pcm_start_capture_work, dbmdx_pcm_start_capture_work);
-	INIT_WORK(&prtd->pcm_stop_capture_work, dbmdx_pcm_stop_capture_work);
+	atomic_set(&prtd->command_in_progress, 0);
+	atomic_set(&prtd->number_of_cmds_in_progress, 0);
+
+	INIT_DELAYED_WORK(&prtd->pcm_start_capture_work,
+		dbmdx_pcm_start_capture_work);
+	INIT_DELAYED_WORK(&prtd->pcm_stop_capture_work,
+		dbmdx_pcm_stop_capture_work);
+	prtd->dbmdx_pcm_workq = create_workqueue("dbmdx-pcm-wq");
+	if (!prtd->dbmdx_pcm_workq) {
+		pr_err("%s: Could not create pcm workqueue\n", __func__);
+		ret = -EIO;
+		goto out_free_timer;
+	}
 
 	runtime->private_data = prtd;
 
@@ -418,6 +468,8 @@ static int dbmdx_pcm_open(struct snd_pcm_substream *substream)
 
 	return 0;
 
+out_free_timer:
+	kfree(timer);
 out_free_prtd:
 	kfree(prtd);
 out_unlock:
@@ -431,6 +483,7 @@ static int dbmdx_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_dbmdx_runtime_data *prtd;
 	int ret = 0;
+	int num_of_active_cmds;
 
 	pr_debug("%s: cmd=%d\n", __func__, cmd);
 
@@ -446,14 +499,36 @@ static int dbmdx_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 		return -EFAULT;
 	}
 
+	num_of_active_cmds = atomic_read(&prtd->number_of_cmds_in_progress);
+	pr_debug("%s: Number of active commands=%d\n", __func__,
+		num_of_active_cmds);
+
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
-		schedule_work(&prtd->pcm_start_capture_work);
+		atomic_inc(&prtd->number_of_cmds_in_progress);
+		ret = queue_delayed_work(prtd->dbmdx_pcm_workq,
+			&prtd->pcm_start_capture_work,
+			msecs_to_jiffies(num_of_active_cmds*100));
+		if (!ret) {
+			pr_debug("%s: Start command is already pending\n",
+				__func__);
+			atomic_dec(&prtd->number_of_cmds_in_progress);
+		} else
+			pr_debug("%s: Start has been scheduled\n", __func__);
 		break;
 	case SNDRV_PCM_TRIGGER_RESUME:
 		return 0;
 	case SNDRV_PCM_TRIGGER_STOP:
-		schedule_work(&prtd->pcm_stop_capture_work);
+		atomic_inc(&prtd->number_of_cmds_in_progress);
+		ret = queue_delayed_work(prtd->dbmdx_pcm_workq,
+			&prtd->pcm_stop_capture_work,
+			msecs_to_jiffies(num_of_active_cmds*100));
+		if (!ret) {
+			pr_debug("%s: Stop command is already pending\n",
+				__func__);
+			atomic_dec(&prtd->number_of_cmds_in_progress);
+		} else
+			pr_debug("%s: Stop has been scheduled\n", __func__);
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 		return 0;
@@ -470,9 +545,13 @@ static int dbmdx_pcm_close(struct snd_pcm_substream *substream)
 
 	pr_debug("%s\n", __func__);
 
-	flush_work(&prtd->pcm_start_capture_work);
-	schedule_work(&prtd->pcm_stop_capture_work);
-	flush_work(&prtd->pcm_stop_capture_work);
+	flush_delayed_work(&prtd->pcm_start_capture_work);
+	queue_delayed_work(prtd->dbmdx_pcm_workq,
+		&prtd->pcm_stop_capture_work,
+		msecs_to_jiffies(0));
+	flush_delayed_work(&prtd->pcm_stop_capture_work);
+	flush_workqueue(prtd->dbmdx_pcm_workq);
+	destroy_workqueue(prtd->dbmdx_pcm_workq);
 	kfree(timer);
 	kfree(prtd);
 	timer = NULL;

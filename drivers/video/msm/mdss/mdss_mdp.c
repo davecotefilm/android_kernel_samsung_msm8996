@@ -226,10 +226,14 @@ u32 mdss_mdp_fb_stride(u32 fb_index, u32 xres, int bpp)
 static irqreturn_t mdss_irq_handler(int irq, void *ptr)
 {
 	struct mdss_data_type *mdata = ptr;
-	u32 intr = MDSS_REG_READ(mdata, MDSS_REG_HW_INTR_STATUS);
+	u32 intr;
 
 	if (!mdata)
 		return IRQ_NONE;
+	else if (!mdss_get_irq_enable_state(&mdss_mdp_hw))
+		return IRQ_HANDLED;
+
+	intr = MDSS_REG_READ(mdata, MDSS_REG_HW_INTR_STATUS);
 
 	mdss_mdp_hw.irq_info->irq_buzy = true;
 
@@ -965,6 +969,7 @@ void mdss_mdp_clk_ctrl(int enable)
 		spin_lock_irqsave(&mdp_lock, flags);
 		mdata->clk_ena = enable;
 		spin_unlock_irqrestore(&mdp_lock, flags);
+
 		mdss_mdp_clk_update(MDSS_CLK_AHB, enable);
 		mdss_mdp_clk_update(MDSS_CLK_AXI, enable);
 		mdss_mdp_clk_update(MDSS_CLK_MDP_CORE, enable);

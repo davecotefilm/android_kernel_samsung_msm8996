@@ -722,6 +722,9 @@ struct msm_flash_cfg_data_t {
 		struct msm_flash_init_info_t *flash_init_info;
 		struct msm_camera_i2c_reg_setting_array *settings;
 	} cfg;
+#if 1//defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+	int32_t ir_led_config;
+#endif
 };
 
 /* sensor init structures and enums */
@@ -914,6 +917,9 @@ struct msm_flash_cfg_data_t32 {
 		compat_uptr_t flash_init_info;
 		compat_uptr_t settings;
 	} cfg;
+#if 1//defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+	int32_t ir_led_config;
+#endif
 };
 
 struct companion_read_cal_data32 {

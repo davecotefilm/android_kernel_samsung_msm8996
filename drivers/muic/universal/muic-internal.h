@@ -22,6 +22,9 @@
 #define __MUIC_INTERNAL_H__
 
 #include <linux/muic/muic.h>
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+#include <linux/input.h>
+#endif
 
 #define MUIC_DEV_NAME   "muic-universal"
 
@@ -130,6 +133,24 @@ struct muic_irq_t {
 	int irq_adc;
 	int irq_chgtyp;
 	int irq_vbvolt;
+	int irq_dcdtmr;
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+	int irq_int1_attach;
+	int irq_int1_detach;
+	int irq_int2_vbusdet_on;
+	int irq_int2_rid_charger;
+	int irq_int2_mhl;
+	int irq_int2_adc_chg;
+	int irq_int2_rev_acce;
+	int irq_int2_vbus_off;
+	int irq_int3_qc20_accepted;
+	int irq_int3_afc_error;
+	int irq_int3_afc_sta_chg;
+	int irq_int3_multi_byte;
+	int irq_int3_vbus_update;
+	int irq_int3_afc_accepted;
+	int irq_int3_afc_ta_attached;
+#endif
 };
 
 typedef union _muic_vps_t {
@@ -182,6 +203,7 @@ typedef struct _muic_data_t {
 	bool			is_muic_ready;
 	bool			undefined_range;
 	bool			discard_interrupt;
+	bool			is_dcdtmr_intr;
 
 	struct hv_data		*phv;
 
@@ -189,13 +211,22 @@ typedef struct _muic_data_t {
 	/* USB Notifier */
 	struct notifier_block	usb_nb;
 #endif
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+	bool			is_earkeypressed;
+	int			old_keycode;
+	struct input_dev        *input;
+#endif
 
 #if defined(CONFIG_MUIC_SUPPORT_CCIC)
 	/* legacy TA or USB for CCIC */
 	muic_attached_dev_t	legacy_dev;
 
 	/* CCIC Notifier */
+#ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
+	struct notifier_block	manager_nb;
+#else
 	struct notifier_block	ccic_nb;
+#endif
 
 	struct delayed_work	ccic_work;
 

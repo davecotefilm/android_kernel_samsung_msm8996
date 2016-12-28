@@ -338,6 +338,11 @@ void mmc_add_host_debugfs(struct mmc_host *host)
 		&host->clk_scaling.skip_clk_scale_freq_update))
 		goto err_node;
 
+	if (!debugfs_create_bool("cmdq_task_history",
+		S_IRUSR | S_IWUSR, root,
+		&host->cmdq_thist_enabled))
+		goto err_node;
+
 #ifdef CONFIG_MMC_CLKGATE
 	if (!debugfs_create_u32("clk_delay", (S_IRUSR | S_IWUSR),
 				root, &host->clk_delay))
@@ -436,7 +441,6 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 		}
 	}
 	err = mmc_send_ext_csd(card, ext_csd);
-	mmc_put_card(card);
 	if (err)
 		goto out_free;
 
@@ -453,6 +457,7 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 			       mmc_hostname(card->host), __func__);
 	}
 
+	mmc_put_card(card);
 	kfree(ext_csd);
 	return 0;
 
@@ -462,6 +467,7 @@ out_free:
 			pr_err("%s: %s: cmdq unhalt failed\n",
 			       mmc_hostname(card->host), __func__);
 	}
+	mmc_put_card(card);
 out_free_halt:
 	kfree(buf);
 	kfree(ext_csd);

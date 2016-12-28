@@ -722,11 +722,13 @@ static int subsys_start(struct subsys_device *subsys)
 static void subsys_stop(struct subsys_device *subsys)
 {
 	const char *name = subsys->desc->name;
+	pr_err("%s: %s\n",__func__,name);
 
 	if (!of_property_read_bool(subsys->desc->dev->of_node,
 					"qcom,pil-force-shutdown")) {
 		/* to check subsystem shutdown */
 		sys_shutdown_status = 1;
+		pr_err("%s: %s sysmon_send_shutdown\n",__func__,name);
 
 		subsys->desc->sysmon_shutdown_ret =
 				sysmon_send_shutdown(subsys->desc);
@@ -771,6 +773,7 @@ void *__subsystem_get(const char *name, const char *fw_name)
 
 	track = subsys_get_track(subsys);
 	mutex_lock(&track->lock);
+	pr_err("%s: %s count:%d\n",__func__,name, subsys->count);
 	if (!subsys->count) {
 		if (fw_name) {
 			pr_info("Changing subsys fw_name to %s\n", fw_name);
@@ -844,6 +847,7 @@ void subsystem_put(void *subsystem)
 
 	track = subsys_get_track(subsys);
 	mutex_lock(&track->lock);
+	pr_err("%s: %s count:%d\n",__func__,subsys->desc->name, subsys->count);
 	if (WARN(!subsys->count, "%s: %s: Reference count mismatch\n",
 			subsys->desc->name, __func__))
 		goto err_out;

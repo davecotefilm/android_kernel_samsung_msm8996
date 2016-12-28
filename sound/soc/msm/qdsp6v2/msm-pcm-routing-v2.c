@@ -5094,7 +5094,7 @@ static const struct snd_kcontrol_new mi2s_rx_vi_fb_mux =
 
 #ifdef CONFIG_SEC_SND_SOLUTION
 static const struct snd_kcontrol_new ss_solution_mixer_controls[] = {
-	SOC_SINGLE_MULTI_EXT("SA data", SND_SOC_NOPM, 0, 65535, 0, 24,
+	SOC_SINGLE_MULTI_EXT("SA data", SND_SOC_NOPM, 0, 65535, 0, 25,
 				msm_sec_sa_get, msm_sec_sa_put),
 	SOC_SINGLE_MULTI_EXT("VSP data", SND_SOC_NOPM, 0, 65535, 0, 1,
 				msm_sec_vsp_get, msm_sec_vsp_put),

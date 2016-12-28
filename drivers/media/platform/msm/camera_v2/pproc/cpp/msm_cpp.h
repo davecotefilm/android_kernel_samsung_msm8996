@@ -104,8 +104,8 @@ enum cpp_vbif_client {
 };
 
 struct msm_cpp_vbif_data {
+	int (*err_handler[VBIF_CLIENT_MAX])(void *, uint32_t);
 	void *dev[VBIF_CLIENT_MAX];
-	int (*err_handler[VBIF_CLIENT_MAX]) (void *, uint32_t);
 };
 
 struct cpp_subscribe_info {

@@ -26,9 +26,6 @@
 
 			29 00 00 00 00 00 02 C4 03			/* Dual DSI */
 			29 01 00 00 00 00 02 F9 03			/* MIC disable */
-			29 01 00 00 78 00 03 B5 BC 4A		/* defualt ELVSS is 0x0A(-4.5V),
-												* but set 0x4A(-2.9V) to avoid glitter issue (2V more diff between ELVSS and VINT)
-												*/
 
 			29 00 00 00 00 00 02 35 00			/* TE Vsync ON */
 
@@ -53,10 +50,14 @@
 				00 00 00
 				00 00
 			29 00 00 00 00 00 0B B1 54 20 1A 33 5E 8C B3 D9	00 0A	/* AID 0% */
+			29 00 00 00 00 00 03 B5 BC 4A		/* ELVSS Setting:CAPS ON : acl off */
+												/* defualt ELVSS is 0x0A(-4.5V),
+												 * but set 0x4A(-2.9V) to avoid glitter issue (2V more diff between ELVSS and VINT)
+												 */
 			29 00 00 00 00 00 03 F4 AB 1E		/* VINT set */
 			29 00 00 00 00 00 02 55 00			/* acl off */
 
-			29 01 00 00 01 00 02 F7 03			/* Gamma, LTPS(AID) update wait more 100ns */
+			29 01 00 00 78 00 02 F7 03			/* Gamma, LTPS(AID) update wait more 100ns */
 			29 00 00 00 00 00 02 F7 00
 
 			29 01 00 00 00 00 03 F0 A5 A5		/* TEST KEY key Disable  */
@@ -112,8 +113,8 @@
 		/*qcom,mdss-dsi-pwm-gpio=*/
 
 		qcom,mdss-dsi-bl-min-level = <1>;
-		qcom,mdss-dsi-bl-max-level = <255>;
-		qcom,mdss-brightness-max-level = <255>;
+		qcom,mdss-dsi-bl-max-level = <365>;
+		qcom,mdss-brightness-max-level = <365>;
 		qcom,mdss-dsi-interleave-mode = <0>;
 		qcom,mdss-dsi-panel-type = "dsi_cmd_mode";
 
@@ -190,7 +191,7 @@
 		qcom,mdss-dsi-panel-status-irq-trigger1 = "rising";
 		qcom,mdss-dsi-panel-status-irq-trigger2 = "falling";
 
-		samsung,esd_2c_short1_tx_cmds_revA = [
+		samsung,esd_recovery_1_tx_cmds_revA = [
 			07 00 00 00 00 00 01 00
 			05 00 00 00 00 00 01 38
 			05 00 00 00 00 00 01 2c
@@ -199,7 +200,7 @@
 			29 01 00 00 00 00 03 F0 A5 A5
 		];
 
-		samsung,esd_2c_short2_tx_cmds_revA = [
+		samsung,esd_recovery_2_tx_cmds_revA = [
 			07 00 00 00 00 00 01 00
 			05 00 00 00 00 00 01 38
 			05 00 00 00 00 00 01 2c
@@ -466,6 +467,7 @@
 		* ************************************************************************************************************************
 		*/
 
+		samsung,enter_hbm_lux = <10000>;
 		samsung,hbm_rx_cmds_revA = [ 06 01 00 00 00 00 01 B3 21 00];	/* read C8 51~65th , 50=0x32 */
 		samsung,hbm2_rx_cmds_revA = [ 06 01 00 00 00 00 01 c8 14 44];	/* read C8 69~88th , 68=0x44 */
 
@@ -1404,6 +1406,16 @@
 			71	243	246	403
 			72	247	250	412
 			73	251	255	420
+		>;
+
+		samsung,hbm_candela_map_table_revA = <
+			0	282	295	465	6
+			1	296	309	488	7
+			2	310	323	510	8
+			3	324	336	533	9
+			4	337	350	555	10
+			5	351	364	578	11
+			6	365	365	600	12
 		>;
 
 		/*

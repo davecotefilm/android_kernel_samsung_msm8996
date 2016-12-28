@@ -21,7 +21,7 @@ static int pid;
 /* factory Sysfs							 */
 /*************************************************************************/
 
-static char operation_mode_flag[10];
+static char operation_mode_flag[11];
 
 static ssize_t dumpstate_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -49,7 +49,10 @@ static ssize_t operation_mode_show(struct device *dev,
 static ssize_t operation_mode_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
-	sprintf(operation_mode_flag, "%s", buf);
+	int i;
+	for(i = 0; i < 10 && buf[i] != '\0'; i++)
+		operation_mode_flag[i] = buf[i];
+	operation_mode_flag[i] = '\0';
 
 	pr_info("[FACTORY] %s: operation_mode_flag = %s\n", __func__,
 		operation_mode_flag);
@@ -136,12 +139,30 @@ static ssize_t pid_store(struct device *dev,
 }
 static DEVICE_ATTR(ssc_pid, S_IRUSR | S_IRGRP | S_IWUSR | S_IWGRP, pid_show, pid_store);
 
+static ssize_t remove_sensor_sysfs_store(struct device *dev,
+    struct device_attribute *attr, const char *buf, size_t size)
+{
+	int type = ADSP_FACTORY_SENSOR_MAX;
+
+	if (kstrtoint(buf, 10, &type)) {
+		pr_err("[FACTORY] %s: kstrtoint fail\n", __func__);
+		return -EINVAL;
+	}
+
+	pr_info("[FACTORY] %s: type = %d\n", __func__, type);
+
+	adsp_factory_unregister(type);
+
+	return size;
+}
+static DEVICE_ATTR(remove_sysfs, S_IWUSR | S_IWGRP, NULL, remove_sensor_sysfs_store);
 
 static struct device_attribute *core_attrs[] = {
 	&dev_attr_dumpstate,
 	&dev_attr_operation_mode,
 	&dev_attr_mode,
 	&dev_attr_ssc_pid,
+	&dev_attr_remove_sysfs,
 	NULL,
 };
 

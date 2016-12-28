@@ -224,6 +224,7 @@ static ssize_t etspi_write(struct file *filp,
 }
 
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
+#ifdef CONFIG_SENSORS_FP_LOCKSCREEN_MODE
 static int etspi_send_wake_up_signal(struct etspi_data *etspi)
 {
 	int ret = 0;
@@ -242,6 +243,7 @@ static int etspi_send_wake_up_signal(struct etspi_data *etspi)
 
 	return ret;
 }
+#endif
 
 static int etspi_register_wake_up_signal(struct etspi_data *etspi,
 				       u8 *arg)

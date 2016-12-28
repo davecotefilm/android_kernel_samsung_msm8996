@@ -119,6 +119,8 @@ struct qusb_phy {
 	int			vdd_levels[3]; /* none, low, high */
 	int			init_seq_len;
 	int			*qusb_phy_init_seq;
+	int			init_seq_host_len;
+	int			*qusb_phy_init_seq_host;
 
 	u32			tune2_val;
 	int			tune2_efuse_bit_pos;
@@ -629,14 +631,6 @@ static int qusb_phy_init(struct usb_phy *phy)
 				qphy->base + QUSB2PHY_PORT_TUNE2);
 	}
 
-#ifdef CONFIG_USB_HOST_NOTIFY
-	if(qphy->phy.otg_mode == OTG_MODE_HOST) {
-		writel_relaxed(0xf8, qphy->base + QUSB2PHY_PORT_TUNE1);
-		writel_relaxed(0xc3, qphy->base + QUSB2PHY_PORT_TUNE2);
-		writel_relaxed(0x83, qphy->base + QUSB2PHY_PORT_TUNE3);
-	}
-#endif
-
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 	pr_info("PHY Tune1:%x,Tune2:%x,Tune3:%x,Tune4:%x",
 			readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE1),
@@ -848,6 +842,27 @@ static int qusb_phy_set_mode(struct usb_phy *phy,
 	dev_info(phy->dev, "qusb_phy_set_mode, usb_otg_mode=%d\n", mode);
 
 	qphy->phy.otg_mode = mode;
+
+#ifdef CONFIG_USB_HOST_NOTIFY
+	if(qphy->phy.otg_mode == OTG_MODE_HOST) {
+		if (qphy->qusb_phy_init_seq_host) {
+			pr_info("PHY Tune, host mode, qusb_phy_init_seq_host is valid\n");
+			qusb_phy_write_seq(qphy->base, qphy->qusb_phy_init_seq_host,
+				qphy->init_seq_host_len, 0);
+		} else {
+			pr_info("PHY Tune, host mode, qusb_phy_init_seq_host is not defined in dtsi\n");
+					writel_relaxed(0xf8, qphy->base + QUSB2PHY_PORT_TUNE1);
+					writel_relaxed(0xc3, qphy->base + QUSB2PHY_PORT_TUNE2);
+					writel_relaxed(0x83, qphy->base + QUSB2PHY_PORT_TUNE3);
+		}
+
+		pr_info("PHY Tune1:%x,Tune2:%x,Tune3:%x,Tune4:%x",
+				readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE1),
+				readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE2),
+				readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE3),
+				readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE4));
+	}
+#endif
 	return 0;
 }
 #endif
@@ -1027,6 +1042,29 @@ static int qusb_phy_probe(struct platform_device *pdev)
 				qphy->init_seq_len);
 		} else {
 			dev_err(dev, "error allocating memory for phy_init_seq\n");
+		}
+	}
+
+	of_get_property(dev->of_node, "qcom,qusb-phy-init-host-seq", &size);
+	if (size) {
+		qphy->qusb_phy_init_seq_host = devm_kzalloc(dev,
+						size, GFP_KERNEL);
+		if (qphy->qusb_phy_init_seq_host) {
+			qphy->init_seq_host_len =
+				(size / sizeof(*qphy->qusb_phy_init_seq_host));
+			if (qphy->init_seq_host_len % 2) {
+				dev_err(dev, "invalid init_seq_host_len\n");
+				return -EINVAL;
+			}
+
+			ret = of_property_read_u32_array(dev->of_node,
+				"qcom,qusb-phy-init-host-seq",
+				qphy->qusb_phy_init_seq_host,
+				qphy->init_seq_host_len);
+			if (ret < 0)
+				qphy->qusb_phy_init_seq_host = NULL;
+		} else {
+			dev_err(dev, "error allocating memory for phy_init_seq_host\n");
 		}
 	}
 

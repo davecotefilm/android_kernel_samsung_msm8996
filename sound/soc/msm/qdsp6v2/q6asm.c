@@ -1075,6 +1075,7 @@ struct audio_client *q6asm_audio_client_alloc(app_cb cb, void *priv)
 	ac->fptr_cache_ops = NULL;
 	/* DSP expects stream id from 1 */
 	ac->stream_id = 1;
+	INIT_LIST_HEAD(&ac->no_wait_que);
 	ac->apr = apr_register("ADSP", "ASM", \
 			(apr_fn)q6asm_callback,\
 			((ac->session) << 8 | 0x0001),\
@@ -1121,7 +1122,6 @@ struct audio_client *q6asm_audio_client_alloc(app_cb cb, void *priv)
 	atomic_set(&ac->cmd_state, 0);
 	atomic_set(&ac->nowait_cmd_cnt, 0);
 	spin_lock_init(&ac->no_wait_que_spinlock);
-	INIT_LIST_HEAD(&ac->no_wait_que);
 	atomic_set(&ac->mem_state, 0);
 
 	rc = send_asm_custom_topology(ac);
@@ -4477,7 +4477,7 @@ static int q6asm_memory_map_regions(struct audio_client *ac, int dir,
 	struct asm_buffer_node *buffer_node = NULL;
 	int	rc = 0;
 	int    i = 0;
-	uint32_t cmd_size = 0;
+	int	cmd_size = 0;
 	uint32_t bufcnt_t;
 	uint32_t bufsz_t;
 
@@ -4499,24 +4499,9 @@ static int q6asm_memory_map_regions(struct audio_client *ac, int dir,
 		bufsz_t = PAGE_ALIGN(bufsz_t);
 	}
 
-	if (bufcnt_t > (UINT_MAX
-			- sizeof(struct avs_cmd_shared_mem_map_regions))
-			/ sizeof(struct avs_shared_map_region_payload)) {
-		pr_err("%s: Unsigned Integer Overflow. bufcnt_t = %u\n",
-				__func__, bufcnt_t);
-		return -EINVAL;
-	}
-
 	cmd_size = sizeof(struct avs_cmd_shared_mem_map_regions)
 			+ (sizeof(struct avs_shared_map_region_payload)
 							* bufcnt_t);
-
-
-	if (bufcnt > (UINT_MAX / sizeof(struct asm_buffer_node))) {
-		pr_err("%s: Unsigned Integer Overflow. bufcnt = %u\n",
-				__func__, bufcnt);
-		return -EINVAL;
-	}
 
 	buffer_node = kzalloc(sizeof(struct asm_buffer_node) * bufcnt,
 				GFP_KERNEL);
@@ -5445,8 +5430,9 @@ int q6asm_set_sa(struct audio_client *ac, long *param)
 	cmd.m3DPositionAngle[1] = param[21];
 	cmd.m3DPositionGain[0] = param[22];
 	cmd.m3DPositionGain[1] = param[23];
+	cmd.AHDRonoff = param[24];
 	pr_info("%s: %d %d %d %d %d %d %d %d %d"
-		" %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n",
+		" %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n",
 		__func__,
 		cmd.OutDevice, cmd.Preset, cmd.EqLev[0],
 		cmd.EqLev[1], cmd.EqLev[2], cmd.EqLev[3],
@@ -5455,7 +5441,8 @@ int q6asm_set_sa(struct audio_client *ac, long *param)
 		cmd.CHRoomSize, cmd.Clalevel, cmd.volume,
 		cmd.Sqrow, cmd.Sqcol, cmd.TabInfo,
 		cmd.NewUI, cmd.m3DPositionOn, cmd.m3DPositionAngle[0],
-		cmd.m3DPositionAngle[1],cmd.m3DPositionGain[0], cmd.m3DPositionGain[1]);
+		cmd.m3DPositionAngle[1],cmd.m3DPositionGain[0], cmd.m3DPositionGain[1],
+		cmd.AHDRonoff);
 
 	rc = apr_send_pkt(ac->apr, (uint32_t *)&cmd);
 	if (rc < 0) {

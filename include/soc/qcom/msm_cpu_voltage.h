@@ -11,4 +11,4 @@
  * GNU General Public License for more details.
  */
 
-int msm_match_cpu_voltage(unsigned long input_freq);
+unsigned int msm_match_cpu_voltage_btol(unsigned int input_freq);

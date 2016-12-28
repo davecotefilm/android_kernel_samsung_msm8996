@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,6 +21,7 @@
 #include <linux/dma-buf.h>
 #include <linux/msm_ion.h>
 #include "msm_cpp.h"
+
 /* Maximum number of result buffers */
 #define MSM_FD_MAX_RESULT_BUFS 5
 /* Max number of clocks defined in device tree */
@@ -212,12 +213,14 @@ enum msm_fd_mem_resources {
  * @work_queue: Pointer to FD device IRQ bottom half workqueue.
  * @work: IRQ bottom half work struct.
  * @hw_halt_completion: Completes when face detection hw halt completes.
+ * @recovery_mode: Indicates if FD is in recovery mode
  */
 struct msm_fd_device {
 	u32 hw_revision;
 
 	struct mutex lock;
 	spinlock_t slock;
+	struct mutex recovery_lock;
 	int ref_count;
 
 	int irq_num;
@@ -250,6 +253,7 @@ struct msm_fd_device {
 	struct work_struct work;
 	struct completion hw_halt_completion;
 	uint32_t clk_rate_idx;
+	int recovery_mode;
 };
 
 #endif /* __MSM_FD_DEV_H__ */

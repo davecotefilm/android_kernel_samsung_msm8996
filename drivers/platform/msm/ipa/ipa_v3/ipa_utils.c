@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -3239,6 +3239,10 @@ void _ipa_cfg_ep_aggr_v3_0(u32 pipe_number,
 			IPA_ENDP_INIT_AGGR_N_AGGR_PKT_LIMIT_SHFT,
 			IPA_ENDP_INIT_AGGR_N_AGGR_PKT_LIMIT_BMSK);
 
+	IPA_SETFIELD_IN_REG(reg_val, ep_aggr->aggr_sw_eof_active,
+			IPA_ENDP_INIT_AGGR_n_AGGR_SW_EOF_ACTIVE_SHFT,
+			IPA_ENDP_INIT_AGGR_N_AGGR_SW_EOF_ACTIVE_BMSK);
+
 	/* set byte-limit aggregation behavior to soft-byte limit */
 	IPA_SETFIELD_IN_REG(reg_val, 0,
 			IPA_ENDP_INIT_AGGR_N_AGGR_HARD_BYTE_LIMIT_ENABLE_SHFT,
@@ -3281,6 +3285,8 @@ int ipa3_cfg_ep_aggr(u32 clnt_hdl, const struct ipa_ep_cfg_aggr *ep_aggr)
 			ipa3_get_aggr_type_str(ep_aggr->aggr),
 			ep_aggr->aggr_byte_limit,
 			ep_aggr->aggr_time_limit);
+	IPADBG("aggr_sw_eof_active=%d\n",
+		ep_aggr->aggr_sw_eof_active);
 
 	/* copy over EP cfg */
 	ipa3_ctx->ep[clnt_hdl].cfg.aggr = *ep_aggr;
@@ -4726,6 +4732,7 @@ int ipa3_bind_api_controller(enum ipa_hw_type ipa_hw_type,
 	api_ctrl->ipa_get_smem_restr_bytes = ipa3_get_smem_restr_bytes;
 	api_ctrl->ipa_uc_wdi_get_dbpa = ipa3_uc_wdi_get_dbpa;
 	api_ctrl->ipa_uc_reg_rdyCB = ipa3_uc_reg_rdyCB;
+	api_ctrl->ipa_uc_dereg_rdyCB = ipa3_uc_dereg_rdyCB;
 	api_ctrl->ipa_rm_create_resource = ipa3_rm_create_resource;
 	api_ctrl->ipa_rm_delete_resource = ipa3_rm_delete_resource;
 	api_ctrl->ipa_rm_register = ipa3_rm_register;

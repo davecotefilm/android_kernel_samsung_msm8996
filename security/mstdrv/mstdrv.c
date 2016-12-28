@@ -132,7 +132,7 @@ extern void mst_ctrl_of_mst_hw_onoff(bool on){
 		printk(KERN_ERR "[MST] %s: regulator3_0 is invalid(NULL)\n", __func__);
 		return ;
 	}
-	mst_power_on = on;
+	
 	if(on) {
 		printk("[MST] %s : nfc_status gets back to 0(unlock)\n", __func__);
 		nfc_state = 0;
@@ -149,6 +149,7 @@ extern void mst_ctrl_of_mst_hw_onoff(bool on){
 		printk("[MST] %s : regulator 3.0 is disabled\n", __func__);
 		printk("[MST] %s : nfc_status gets 1(lock)\n", __func__);
 		nfc_state = 1;
+		mst_power_on = on;
 	}
 	regulator_put(regulator3_0);
 }
@@ -349,7 +350,7 @@ static ssize_t store_mst_drv(struct device *dev,
 					break;
 				}
 				printk("[MST] Send track2 data --> successful\n");
-				mdelay(1500);
+				mdelay(1000);
 			}
 			break;
 

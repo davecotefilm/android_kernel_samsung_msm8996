@@ -55,6 +55,8 @@ struct sec_param_data {
 #endif
 	unsigned int cp_reserved_mem;
 	char param_carrierid[4]; //only use 3digits, 1 for null
+	char param_sales[4]; //only use 3digits, 1 for null
+	char param_lcd_resolution[8]; // Variable LCD resolution
 };
 
 struct sec_param_data_s {
@@ -94,8 +96,21 @@ enum sec_param_index {
 	param_index_afc_disable,
 #endif	
 	param_index_cp_reserved_mem,
+	param_index_lcd_resolution,
+	param_index_max_sec_param_data,
+#ifdef CONFIG_USER_RESET_DEBUG
+	param_index_reset_ex_info,
+#endif
 };
 
 extern bool sec_get_param(enum sec_param_index index, void *value);
 extern bool sec_set_param(enum sec_param_index index, void *value);
+
+#define SEC_PARAM_FILE_SIZE	(0xA00000)		/* 10MB */
+#define SEC_PARAM_FILE_OFFSET (SEC_PARAM_FILE_SIZE - 0x100000)
+#define SECTOR_UNIT_SIZE (4096) /* UFS */
+
+#ifdef CONFIG_USER_RESET_DEBUG 
+#define SEC_PARAM_EX_INFO_OFFSET (SEC_PARAM_FILE_SIZE - (3 * SECTOR_UNIT_SIZE))
+#endif
 

@@ -95,6 +95,9 @@ static unsigned int octa_color = 0x0;
 static unsigned int brightness_ratio_r = 100;
 static unsigned int brightness_ratio_g = 100;
 static unsigned int brightness_ratio_b = 100;
+static unsigned int brightness_ratio_r_low = 20;
+static unsigned int brightness_ratio_g_low = 20;
+static unsigned int brightness_ratio_b_low = 20;
 
 extern int get_lcd_attached(char*);
 
@@ -222,13 +225,22 @@ static void max77854_rgb_set_state(struct led_classdev *led_cdev,
 		/* apply brightness ratio for optimize each led brightness*/
 		switch(n) {
 		case RED:
-			brightness = brightness * brightness_ratio_r / 100;
+			if (device_type == 3 && led_lowpower_mode == 1)
+				brightness = brightness * brightness_ratio_r_low / 100;
+			else
+				brightness = brightness * brightness_ratio_r / 100;
 			break;
 		case GREEN:
-			brightness = brightness * brightness_ratio_g / 100;
+			if (device_type == 3 && led_lowpower_mode == 1)
+				brightness = brightness * brightness_ratio_g_low / 100;
+			else
+				brightness = brightness * brightness_ratio_g / 100;
 			break;
 		case BLUE:
-			brightness = brightness * brightness_ratio_b / 100;
+			if (device_type == 3 && led_lowpower_mode == 1)
+				brightness = brightness * brightness_ratio_b_low / 100;
+			else
+				brightness = brightness * brightness_ratio_b / 100;
 			break;
 		}
 
@@ -351,6 +363,18 @@ static int max77854_rgb_blink(struct device *dev,
 }
 
 #ifdef CONFIG_OF
+struct device_type_match {
+	char name[20];
+	unsigned int dev_num;
+};
+
+static struct device_type_match device_type_table[] = {
+	{"hero", 0},
+	{"hero2", 1},
+	{"poseidon", 2},
+	{"grace", 3},
+};
+
 static struct max77854_rgb_platform_data
 			*max77854_rgb_parse_dt(struct device *dev)
 {
@@ -359,10 +383,14 @@ static struct max77854_rgb_platform_data
 	int ret;
 	int i;
 	int temp;
+	const char *temp_str;
 	char octa[4] = {0, };
 	char br_ratio_r[23] = "br_ratio_r";
 	char br_ratio_g[23] = "br_ratio_g";
 	char br_ratio_b[23] = "br_ratio_b";
+	char br_ratio_r_low[23] = "br_ratio_r_low";
+	char br_ratio_g_low[23] = "br_ratio_g_low";
+	char br_ratio_b_low[23] = "br_ratio_b_low";
 	char normal_po_cur[29] = "normal_powermode_current";
 	char low_po_cur[26] = "low_powermode_current";
 
@@ -392,12 +420,19 @@ static struct max77854_rgb_platform_data
 	}
 
 	/* get device_type value in dt */
-	ret = of_property_read_u32(np, "device_type", &temp);
+	ret = of_property_read_string(np, "device_type", &temp_str);
 	if (IS_ERR_VALUE(ret)) {
 		pr_info("leds-max77854-rgb: %s, can't parsing device_type in dt\n", __func__);
-	}
-	else {
-		device_type = (u8)temp;
+	} else {
+		for (i = 0; i < ARRAY_SIZE(device_type_table); i++) {
+			if(!strncmp(device_type_table[i].name,
+				temp_str, strlen(device_type_table[i].name))) {
+					device_type = device_type_table[i].dev_num;
+				break;
+			}
+		}
+		if(i == ARRAY_SIZE(device_type_table))
+			pr_err("leds-max77854-rgb: can't find matching device_type\n");
 	}
 	pr_info("leds-max77854-rgb: %s, device_type = %x\n", __func__, device_type);
 
@@ -415,6 +450,9 @@ static struct max77854_rgb_platform_data
 			break;
 		case 3:
 			strcpy(octa, "_gd");
+			break;
+		case 4:
+			strcpy(octa, "_pg");
 			break;
 		default:
 			break;
@@ -435,6 +473,47 @@ static struct max77854_rgb_platform_data
 		case 3:
 			strcpy(octa, "_sv");
 			break;
+		case 4:
+			strcpy(octa, "_pg");
+			break;
+		default:
+			break;
+		}
+	}
+	/* POSEIDON */
+	else if(device_type == 2) {
+		switch(octa_color) {
+		case 0:
+			strcpy(octa, "_gr");
+			break;
+		case 2:
+			strcpy(octa, "_gd");
+			break;
+		case 6:
+			strcpy(octa, "_tt");
+			break;
+		default:
+			break;
+		}
+	}
+	/* GRACE */
+	else if(device_type == 3) {
+		switch(octa_color) {
+		case 0:
+			strcpy(octa, "_u");
+			break;
+		case 1:
+			strcpy(octa, "_bk");
+			break;
+		case 3:
+			strcpy(octa, "_gd");
+			break;
+		case 4:
+			strcpy(octa, "_sv");
+			break;
+		case 6:
+			strcpy(octa, "_bl");
+			break;
 		default:
 			break;
 		}
@@ -444,6 +523,9 @@ static struct max77854_rgb_platform_data
 	strcat(br_ratio_r, octa);
 	strcat(br_ratio_g, octa);
 	strcat(br_ratio_b, octa);
+	strcat(br_ratio_r_low, octa);
+	strcat(br_ratio_g_low, octa);
+	strcat(br_ratio_b_low, octa);
 
 	/* get normal_powermode_current value in dt */
 	ret = of_property_read_u32(np, normal_po_cur, &temp);
@@ -494,6 +576,43 @@ static struct max77854_rgb_platform_data
 	}
 	pr_info("leds-max77854-rgb: %s, brightness_ratio_b = %x\n", __func__, brightness_ratio_b);
 
+	if (device_type == 3) {
+		/* get led red brightness ratio lowpower */
+		ret = of_property_read_u32(np, br_ratio_r_low, &temp);
+		if (IS_ERR_VALUE(ret)) {
+			pr_info("leds-max77854-rgb: %s, can't parsing "\
+					"brightness_ratio_r_low in dt\n", __func__);
+		}
+		else {
+			brightness_ratio_r_low = (int)temp;
+		}
+		pr_info("leds-max77854-rgb: %s, brightness_ratio_r_low = %x\n",
+				__func__, brightness_ratio_r_low);
+
+		/* get led green brightness ratio lowpower*/
+		ret = of_property_read_u32(np, br_ratio_g_low, &temp);
+		if (IS_ERR_VALUE(ret)) {
+			pr_info("leds-max77854-rgb: %s, can't parsing "\
+					"brightness_ratio_g_low in dt\n", __func__);
+		}
+		else {
+			brightness_ratio_g_low = (int)temp;
+		}
+		pr_info("leds-max77854-rgb: %s, brightness_ratio_g_low = %x\n",
+				__func__, brightness_ratio_g_low);
+
+		/* get led blue brightness ratio lowpower */
+		ret = of_property_read_u32(np, br_ratio_b_low, &temp);
+		if (IS_ERR_VALUE(ret)) {
+			pr_info("leds-max77854-rgb: %s, can't parsing "\
+					"brightness_ratio_b_low in dt\n", __func__);
+		}
+		else {
+			brightness_ratio_b_low = (int)temp;
+		}
+		pr_info("leds-max77854-rgb: %s, brightness_ratio_b_low = %x\n",
+				__func__, brightness_ratio_b_low);
+	}
 	return pdata;
 }
 #endif
@@ -567,13 +686,13 @@ static ssize_t store_max77854_rgb_pattern(struct device *dev,
 	struct max77854_rgb *max77854_rgb = dev_get_drvdata(dev);
 	unsigned int mode = 0;
 	int ret;
-	pr_info("leds-max77854-rgb: %s, lowpower_mode : %d\n", __func__,led_lowpower_mode);
 
 	ret = sscanf(buf, "%1d", &mode);
 	if (ret == 0) {
 		dev_err(dev, "fail to get led_pattern mode.\n");
 		return count;
 	}
+	pr_info("leds-max77854-rgb: %s, pattern=%d, lowpower_mode : %d\n", __func__, mode, led_lowpower_mode);
 
 	if (mode > POWERING)
 		return count;
@@ -646,7 +765,11 @@ static ssize_t store_max77854_rgb_blink(struct device *dev,
 	}
 
 	/* Set to low power consumption mode */
-	led_dynamic_current = normal_powermode_current;
+	if (led_lowpower_mode == 1)
+		led_dynamic_current = low_powermode_current;
+	else
+		led_dynamic_current = normal_powermode_current;
+
 	/*Reset led*/
 	max77854_rgb_reset(dev);
 
@@ -717,9 +840,9 @@ static ssize_t store_max77854_rgb_blink(struct device *dev,
 	/*Set LED blink mode*/
 	max77854_rgb_blink(dev, delay_on_time, delay_off_time);
 
-	pr_info("leds-max77854-rgb: %s, delay_on_time= %x, delay_off_time= %x\n", __func__, delay_on_time, delay_off_time);
-	dev_dbg(dev, "led_blink is called, Color:0x%X Brightness:%i\n",
-			led_brightness, led_dynamic_current);
+	pr_info("leds-max77854-rgb: %s, delay_on_time= %d, delay_off_time= %d, brightness: 0x%x, lowpower: %i\n",
+		__func__, delay_on_time, delay_off_time, led_brightness, led_lowpower_mode);
+
 	return count;
 }
 

@@ -465,6 +465,12 @@ config USB_ANDROID_SAMSUNG_SIDESYNC
 	  If you enable this option,
 	  SideSync will be able to be used.
 
+config USB_SAMSUNG_ENHANCED_SS
+	boolean "Samsung Enhaced Super Speed Function"
+	depends on USB_G_ANDROID
+	help
+		Super Speed Related Feature.
+
 config USB_LOCK_SUPPORT_FOR_MDM
 	boolean "Samsung USB_LOCK function for MDM"
 	depends on USB_G_ANDROID

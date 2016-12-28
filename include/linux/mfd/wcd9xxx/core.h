@@ -259,6 +259,7 @@ struct wcd9xxx {
 	u8 version;
 
 	int reset_gpio;
+	struct device_node *wcd_rst_np;
 
 	int (*read_dev)(struct wcd9xxx *wcd9xxx, unsigned short reg,
 			int bytes, void *dest, bool interface_reg);
@@ -272,7 +273,6 @@ struct wcd9xxx {
 
 	u32 num_of_supplies;
 	struct regulator_bulk_data *supplies;
-	struct rpm_regulator *s4_mode_regulator;
 
 	struct wcd9xxx_core_resource core_res;
 

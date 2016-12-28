@@ -96,14 +96,25 @@ Copyright (C) 2012, Samsung Electronics. All rights reserved.
 /* Panel Unique Cell ID Byte count */
 #define MAX_CELL_ID 11
 
+/* Panel Unique OCTA ID Byte count */
+#define MAX_OCTA_ID 20
+
 /* PBA booting ID */
 #define PBA_ID 0xFFFFFF
 
 /* Default elvss_interpolation_lowest_temperature */
 #define ELVSS_INTERPOLATION_TEMPERATURE -20
 
+/* Default lux value for entering mdnie HBM */
+#define ENTER_HBM_LUX 10000
+
 /* MAX ESD Recovery gpio */
 #define MAX_ESD_GPIO 2
+
+#define BASIC_FB_PANLE_TYPE 0x01
+#define NEW_FB_PANLE_TYPE 0x00
+#define OTHERLINE_WORKQ_DEALY 900 /*ms*/
+#define OTHERLINE_WORKQ_CNT 70
 
 extern int poweroff_charging;
 enum mipi_samsung_cmd_list {
@@ -150,11 +161,18 @@ enum mipi_samsung_cmd_list {
 	PANEL_SPI_ENABLE,
 	PANEL_COLOR_WEAKNESS_ENABLE,
 	PANEL_COLOR_WEAKNESS_DISABLE,
-	PANEL_ESD_2C1,
-	PANEL_ESD_2C2,
+	PANEL_ESD_RECOVERY_1,
+	PANEL_ESD_RECOVERY_2,
 	PANEL_MCD_ON,
 	PANEL_MCD_OFF,
 	PANEL_GRADUAL_ACL,
+	PANEL_HW_CURSOR,
+	PANEL_MULTIRES_FHD_TO_WQHD,
+	PANEL_MULTIRES_HD_TO_WQHD,
+	PANEL_MULTIRES_FHD,
+	PANEL_MULTIRES_HD,
+	PANEL_COVER_CONTROL_ENABLE,
+	PANEL_COVER_CONTROL_DISABLE,
 };
 
 enum {
@@ -236,6 +254,7 @@ struct panel_lpm_info {
 	int normal_bl_level;
 	bool esd_recovery;
 	bool param_changed;
+	bool lpm_off_done;
 };
 
 extern char mdss_mdp_panel[MDSS_MAX_PANEL_LEN];
@@ -256,8 +275,19 @@ struct candella_lux_map {
 	int bkl[256];
 };
 
+struct hbm_candella_lux_map {
+	int *lux_tab;
+	int *cmd_idx;
+	int lux_tab_size;
+	int *from;
+	int *end;
+	int *auto_level;
+	int hbm_min_lv;
+};
+
 struct samsung_display_dtsi_data {
 	bool samsung_lp11_init;
+	bool samsung_tcon_clk_on_support;
 	bool samsung_esc_clk_128M;
 	bool samsung_osc_te_fitting;
 	bool samsung_support_factory_panel_swap;
@@ -279,8 +309,8 @@ struct samsung_display_dtsi_data {
 	struct dsi_panel_cmds level2_key_enable_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds level2_key_disable_tx_cmds[SUPPORT_PANEL_REVISION];
 
-	struct dsi_panel_cmds esd_2c_short1_tx_cmds[SUPPORT_PANEL_REVISION];
-	struct dsi_panel_cmds esd_2c_short2_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds esd_recovery_1_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds esd_recovery_2_tx_cmds[SUPPORT_PANEL_REVISION];
 
 	struct dsi_panel_cmds smart_dimming_mtp_rx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds manufacture_read_pre_tx_cmds[SUPPORT_PANEL_REVISION];
@@ -291,6 +321,7 @@ struct samsung_display_dtsi_data {
 	struct dsi_panel_cmds manufacture_date_rx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds ddi_id_rx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds cell_id_rx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds octa_id_rx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds rddpm_rx_cmds[SUPPORT_PANEL_REVISION];
 
 	struct dsi_panel_cmds mtp_read_sysfs_rx_cmds[SUPPORT_PANEL_REVISION];
@@ -308,12 +339,17 @@ struct samsung_display_dtsi_data {
 	struct cmd_map acl_map_table[SUPPORT_PANEL_REVISION];
 	struct candella_lux_map candela_map_table[SUPPORT_PANEL_REVISION];
 
+	struct hbm_candella_lux_map hbm_candela_map_table[SUPPORT_PANEL_REVISION];
+
+	struct dsi_panel_cmds acl_pre_percent_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds acl_percent_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds acl_on_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds gamma_tx_cmds[SUPPORT_PANEL_REVISION];
 
 	struct dsi_panel_cmds elvss_rx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds elvss_pre_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds elvss_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct cmd_map elvss_map_table[SUPPORT_PANEL_REVISION];
 
 	struct cmd_map aid_map_table[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds aid_tx_cmds[SUPPORT_PANEL_REVISION];
@@ -338,9 +374,15 @@ struct samsung_display_dtsi_data {
 	/* CONFIG_TEMPERATURE_ELVSS */
 	struct dsi_panel_cmds elvss_lowtemp_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds elvss_lowtemp2_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds smart_acl_elvss_lowtemp_tx_cmds[SUPPORT_PANEL_REVISION];
 
 	struct dsi_panel_cmds smart_acl_elvss_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct cmd_map smart_acl_elvss_map_table[SUPPORT_PANEL_REVISION];
+
+	/* CONFIG_CAPS */
+	struct dsi_panel_cmds pre_caps_setting_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds caps_setting_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct cmd_map caps_map_table[SUPPORT_PANEL_REVISION];
 
 	/* PARTIAL_UPDATE */
 	struct dsi_panel_cmds partial_display_on_tx_cmds[SUPPORT_PANEL_REVISION];
@@ -354,12 +396,15 @@ struct samsung_display_dtsi_data {
 	struct dsi_panel_cmds lpm_ctrl_hlpm_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds lpm_ctrl_alpm_2nit_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds lpm_ctrl_alpm_40nit_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds lpm_ctrl_alpm_60nit_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds lpm_ctrl_hlpm_2nit_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds lpm_ctrl_hlpm_40nit_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds lpm_ctrl_hlpm_60nit_tx_cmds[SUPPORT_PANEL_REVISION];
 
 	/* Panel LPM(ALPM/HLPM) Brightness Command */
 	struct dsi_panel_cmds lpm_2nit_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds lpm_40nit_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds lpm_60nit_tx_cmds[SUPPORT_PANEL_REVISION];
 
 	/* Panel LPM(ALPM/HLPM) Hz Control command */
 	struct dsi_panel_cmds lpm_1hz_tx_cmds[SUPPORT_PANEL_REVISION];
@@ -415,6 +460,7 @@ struct samsung_display_dtsi_data {
 
 	/* IRC */
 	struct dsi_panel_cmds irc_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds irc_subdivision_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds irc_off_tx_cmds[SUPPORT_PANEL_REVISION];
 	struct dsi_panel_cmds hbm_irc_tx_cmds[SUPPORT_PANEL_REVISION];
 
@@ -424,6 +470,19 @@ struct samsung_display_dtsi_data {
 
 	/* GRADUAL_ACL*/
 	struct dsi_panel_cmds gradual_acl_tx_cmds[SUPPORT_PANEL_REVISION];
+
+	/* H/W Cursor */
+	struct dsi_panel_cmds hw_cursor_tx_cmds[SUPPORT_PANEL_REVISION];
+
+	/* MULTI_RESOLUTION */
+	struct dsi_panel_cmds panel_multires_fhd_to_wqhd[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds panel_multires_hd_to_wqhd[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds panel_multires_fhd[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds panel_multires_hd[SUPPORT_PANEL_REVISION];
+
+	/* COVER CONTROL */
+	struct dsi_panel_cmds panel_cover_control_enable_tx_cmds[SUPPORT_PANEL_REVISION];
+	struct dsi_panel_cmds panel_cover_control_disable_tx_cmds[SUPPORT_PANEL_REVISION];
 
 	/* TFT LCD Features*/
 	int tft_common_support;
@@ -481,6 +540,18 @@ struct hmt_status {
 	int (*hmt_bright_update)(struct mdss_dsi_ctrl_pdata *ctrl);
 };
 
+struct multires_status {
+	bool is_support;
+	unsigned int curr_mode;
+	unsigned int prev_mode;
+};
+
+enum {
+	MULTIRES_WQHD,
+	MULTIRES_FHD,
+	MULTIRES_HD,
+};
+
 struct esd_recovery {
 	spinlock_t irq_lock;
 	bool esd_recovery_init;
@@ -521,22 +592,24 @@ struct panel_func {
 	int (*samsung_manufacture_date_read)(struct mdss_dsi_ctrl_pdata *ctrl);
 	int (*samsung_ddi_id_read)(struct mdss_dsi_ctrl_pdata *ctrl);
 	int (*samsung_cell_id_read)(struct mdss_dsi_ctrl_pdata *ctrl);
+	int (*samsung_octa_id_read)(struct mdss_dsi_ctrl_pdata *ctrl);
 	int (*samsung_hbm_read)(struct mdss_dsi_ctrl_pdata *ctrl);
 	int (*samsung_elvss_read)(struct mdss_dsi_ctrl_pdata *ctrl);
 	int (*samsung_mdnie_read)(struct mdss_dsi_ctrl_pdata *ctrl);
 	int (*samsung_smart_dimming_init)(struct mdss_dsi_ctrl_pdata *ctrl);
 	struct smartdim_conf *(*samsung_smart_get_conf)(void);
 
-	/* force ACL */
-	int (*samsung_force_acl_on)(struct mdss_dsi_ctrl_pdata *ctrl);
-
 	/* Brightness */
 	struct dsi_panel_cmds * (*samsung_brightness_hbm_off)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
 	struct dsi_panel_cmds * (*samsung_brightness_aid)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
 	struct dsi_panel_cmds * (*samsung_brightness_acl_on)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
+	struct dsi_panel_cmds * (*samsung_brightness_pre_acl_percent)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
 	struct dsi_panel_cmds * (*samsung_brightness_acl_percent)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
 	struct dsi_panel_cmds * (*samsung_brightness_acl_off)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
+	struct dsi_panel_cmds * (*samsung_brightness_pre_elvss)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
 	struct dsi_panel_cmds * (*samsung_brightness_elvss)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
+	struct dsi_panel_cmds *(*samsung_brightness_pre_caps)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
+	struct dsi_panel_cmds *(*samsung_brightness_caps)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
 	struct dsi_panel_cmds * (*samsung_brightness_elvss_temperature1)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
 	struct dsi_panel_cmds * (*samsung_brightness_elvss_temperature2)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
 	struct dsi_panel_cmds * (*samsung_brightness_vint)(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key);
@@ -593,18 +666,17 @@ struct panel_func {
 	void (*set_panel_fab_type)(int type);
 	int (*get_panel_fab_type)(void);
 
-	/* COLOR WEAKNESS */
-	int (*get_ccb_cd)(struct mdss_dsi_ctrl_pdata *ctrl);
-	int (*get_ccb_idx)(struct mdss_dsi_ctrl_pdata *ctrl, int ccb_cd);
+	/* color weakness */
 	void (*color_weakness_ccb_on_off)(struct samsung_display_driver_data *vdd, int mode);
 
-	/* Set gradual acl */
-	int (*samsung_set_gradual_acl_status)(struct mdss_dsi_ctrl_pdata *ctrl, int acl_on);
+	/* DDI H/W Cursor */
+	int (*ddi_hw_cursor)(struct mdss_dsi_ctrl_pdata *ctrl, int *input);
 
-	/* LDU correction */
-	int (*get_ldu_cd)(struct mdss_dsi_ctrl_pdata *ctrl, int ldu_correction_state);
-	void (*show_ldu_table)(struct samsung_display_driver_data *vdd);
+	/* MULTI_RESOLUTION */
+	void (*samsung_multires)(struct samsung_display_driver_data *vdd);
 
+	/* COVER CONTROL */
+	void (*samsung_cover_control)(struct mdss_dsi_ctrl_pdata *ctrl, struct samsung_display_driver_data *vdd);
 };
 
 struct samsung_register_info {
@@ -670,6 +742,9 @@ struct samsung_display_driver_data {
 	int temperature;
 	char temperature_value;
 
+	int lux;
+	int enter_hbm_lux;
+
 	int auto_brightness;
 	int prev_auto_brightness;
 	int bl_level;
@@ -725,6 +800,10 @@ struct samsung_display_driver_data {
 	int cell_id_loaded_dsi[SUPPORT_PANEL_COUNT];
 	int cell_id_dsi[SUPPORT_PANEL_COUNT][MAX_CELL_ID];
 
+	/* Panel Unique OCTA ID */
+	int octa_id_loaded_dsi[SUPPORT_PANEL_COUNT];
+	int octa_id_dsi[SUPPORT_PANEL_COUNT][MAX_OCTA_ID];
+
 	int hbm_loaded_dsi[SUPPORT_PANEL_COUNT];
 	int elvss_loaded_dsi[SUPPORT_PANEL_COUNT];
 	int smart_dimming_loaded_dsi[SUPPORT_PANEL_COUNT];
@@ -751,6 +830,12 @@ struct samsung_display_driver_data {
 	struct hmt_status hmt_stat;
 	int smart_dimming_hmt_loaded_dsi[SUPPORT_PANEL_COUNT];
 	struct smartdim_conf *smart_dimming_dsi_hmt[SUPPORT_PANEL_COUNT];
+	/*
+	* MULTI_RESOLUTION
+	*/
+
+	struct multires_status multires_stat;
+
 	/* CABC feature */
 	int support_cabc;
 
@@ -785,12 +870,14 @@ struct samsung_display_driver_data {
 	/* Panel LPM info */
 	struct panel_lpm_info panel_lpm;
 
-	/* send 2c short pck before sending image date to reset DE (only for HA3 ddi) */
-	int send_2c_cmd;
+	/* send recovery pck before sending image date (for ESD recovery) */
+	int send_esd_recovery;
+
 	/* DOZE */
 	struct wake_lock doze_wakelock;
 
 	/* graudal acl */
+	int gradual_acl_val;
 	int gradual_pre_acl_on;
 	int gradual_acl_update;
 	enum ACL_GRADUAL_MODE gradual_acl_status;
@@ -806,6 +893,18 @@ struct samsung_display_driver_data {
 	int ccb_bl_backup;
 	int ccb_cd;
 	int ccb_stepping;
+
+	/* Cover Control Status */
+	int cover_control;
+
+	int select_panel_gpio;
+
+	/* Power Control for LPM */
+	bool lpm_power_control;
+	char lpm_power_control_supply_name[32];
+	int lpm_power_control_supply_min_voltage;
+	int lpm_power_control_supply_max_voltage;
+
 };
 
 /*SPI INTERFACE*/
@@ -887,6 +986,9 @@ int mdss_samsung_create_sysfs(void *data);
 /* EXTERN FUNCTION */
 extern void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 		struct dsi_panel_cmds *pcmds, u32 flags);
+#ifdef CONFIG_FOLDER_HALL
+extern void hall_ic_register_notify(struct notifier_block *nb);
+#endif
 
 /* EXTERN VARIABLE */
 extern struct dsi_status_data *pstatus_data;
@@ -946,6 +1048,8 @@ struct BITMAPFILEHEADER                 /**** BMP file header structure ****/
 #include "S6E3HA2_AMS509ES01/ss_dsi_panel_S6E3HA2_AMS509ES01.h"
 #include "S6E3HA3_AMS567JA01/ss_dsi_panel_S6E3HA3_AMS567JA01.h"
 #include "S6E3HF4_AMB526JS01/ss_dsi_panel_S6E3HF4_AMB526JS01.h"
+#include "S6E3HF4_AMB509ME01/ss_dsi_panel_S6E3HF4_AMB509ME01.h"
+#include "S6E3FA3_AMS549KU01/ss_dsi_panel_S6E3FA3_AMS549KU01.h"
 
 /* PANEL_HEADER END	*/
 

@@ -15,6 +15,9 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include "adsp.h"
+#ifdef CONFIG_SLPI_MOTOR
+#include <slpi_motor.h>
+#endif
 #define VENDOR "STM"
 #define CHIP_ID "K6DS3TR"
 
@@ -22,6 +25,23 @@
 #define RAWDATA_TIMER_MARGIN_MS	20
 #define ACCEL_SELFTEST_TRY_CNT 7
 
+/* Haptic Pattern A vibrate during 7ms.
+ * touch, touchkey, operation feedback use this.
+ * Do not call motor_workfunc when duration is 7ms.
+ */
+#define DURATION_7MS 7
+
+#ifdef CONFIG_SLPI_MOTOR
+struct accel_motor_data {
+	struct workqueue_struct *slpi_motor_wq;
+	struct work_struct work_slpi_motor;
+	int motor_state;
+};
+
+struct accel_motor_data *pdata;
+
+void slpi_motor_work_func(struct work_struct *work);
+#endif
 static ssize_t accel_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -283,6 +303,46 @@ static ssize_t accel_lowpassfilter_store(struct device *dev,
 	return size;
 }
 
+#ifdef CONFIG_SLPI_MOTOR
+int slpi_motor_callback(int state, int duration)
+{
+	pr_info("[FACTORY] %s: state = %d, duration = %d\n", 
+		__func__, pdata->motor_state, duration);
+
+	if (duration == DURATION_7MS)
+		return 0;
+
+	if (pdata->motor_state != state) {
+		pdata->motor_state = state;
+		queue_work(pdata->slpi_motor_wq, &pdata->work_slpi_motor);
+	}
+	return 0;
+}
+
+int (*getMotorCallback(void))(int, int)
+{
+	return slpi_motor_callback;
+}
+
+void slpi_motor_work_func(struct work_struct *work)
+{
+	struct msg_data message;
+	int motor = 0;
+
+	if (pdata->motor_state == 1) {
+		motor = NETLINK_MESSAGE_ACCEL_MOTOR_ON;
+		message.sensor_type = ADSP_FACTORY_ACCEL_MOTOR_ON;
+	} else if (pdata->motor_state == 0) {
+		motor = NETLINK_MESSAGE_ACCEL_MOTOR_OFF;
+		message.sensor_type = ADSP_FACTORY_ACCEL_MOTOR_OFF;
+	}
+
+	pr_info("[FACTORY] %s: state = %d\n", __func__, pdata->motor_state);
+
+//	msleep(RAWDATA_TIMER_MS + RAWDATA_TIMER_MARGIN_MS);
+	adsp_unicast(&message, sizeof(message), motor, 0, 0);
+}
+#endif
 static DEVICE_ATTR(name, S_IRUGO, accel_name_show, NULL);
 static DEVICE_ATTR(vendor, S_IRUGO, accel_vendor_show, NULL);
 static DEVICE_ATTR(type, S_IRUGO, sensor_type_show, NULL);
@@ -311,16 +371,40 @@ static struct device_attribute *acc_attrs[] = {
 static int __init k6ds3_accel_factory_init(void)
 {
 	adsp_factory_register(ADSP_FACTORY_ACCEL, acc_attrs);
+#ifdef CONFIG_SLPI_MOTOR
+	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
 
+	if (pdata == NULL) {
+		pr_err("[FACTORY]: %s - could not allocate memory\n", __func__);
+		return 0;
+	}
+
+	pdata->slpi_motor_wq = 
+		create_singlethread_workqueue("slpi_motor_wq");
+
+	if (pdata->slpi_motor_wq == NULL) {
+		pr_err("[FACTORY]: %s - could not create motor wq\n", __func__);
+		return 0;
+	}
+
+	INIT_WORK(&pdata->work_slpi_motor, slpi_motor_work_func);
+
+	pdata->motor_state = 0;
+#endif
 	pr_info("[FACTORY] %s\n", __func__);
-
 	return 0;
 }
 
 static void __exit k6ds3_accel_factory_exit(void)
 {
 	adsp_factory_unregister(ADSP_FACTORY_ACCEL);
-
+#ifdef CONFIG_SLPI_MOTOR
+	if (pdata != NULL && pdata->slpi_motor_wq != NULL) {
+		cancel_work_sync(&pdata->work_slpi_motor);
+		destroy_workqueue(pdata->slpi_motor_wq);
+		pdata->slpi_motor_wq = NULL;
+	}
+#endif
 	pr_info("[FACTORY] %s\n", __func__);
 }
 module_init(k6ds3_accel_factory_init);

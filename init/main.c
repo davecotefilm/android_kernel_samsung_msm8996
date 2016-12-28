@@ -749,6 +749,12 @@ asmlinkage __visible void __init start_kernel(void)
 	thread_info_cache_init();
 #ifdef CONFIG_TIMA_RKP
 	rkp_init();
+#ifdef CONFIG_RKP_CFP_ROPP
+	rkp_call(CFP_ROPP_INIT, 0, 0, 0, 0, 0);
+#endif
+#ifdef CONFIG_RKP_CFP_JOPP
+	rkp_call(CFP_JOPP_INIT, 0, 0, 0, 0, 0);
+#endif
 #ifdef CONFIG_RKP_KDP
 	rkp_cred_enable = 1;
 #endif /*CONFIG_RKP_KDP*/

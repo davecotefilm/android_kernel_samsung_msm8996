@@ -79,6 +79,18 @@ static int muic_gpio_uart_sel;
 "+CDP:OPEN",
 "+Undefined Charging",
 */
+bool check_supported_unlessdt_list(int mdev)
+{
+#if defined(CONFIG_MUIC_SUPPORT_VZW_ACC)
+	if(mdev == ATTACHED_DEV_VZW_INCOMPATIBLE_MUIC || mdev == ATTACHED_DEV_VZW_ACC_MUIC)
+		return true;
+#endif
+#if defined(CONFIG_MUIC_SUPPORT_LANHUB)
+	if(mdev == ATTACHED_DEV_USB_LANHUB_MUIC)
+		return true;
+#endif
+	return false;
+}
 int of_update_supported_list(struct i2c_client *i2c,
 				struct muic_platform_data *pdata)
 {
@@ -128,17 +140,7 @@ int of_update_supported_list(struct i2c_client *i2c,
 				vps_update_supported_attr(mdev, true);
 		} else if (prop_buf[0] == '-') {
 			if (vps_name_to_mdev(&prop_buf[1], &mdev))
-#if defined(CONFIG_MUIC_SUPPORT_VZW_ACC)
-			{
-				if(mdev == ATTACHED_DEV_VZW_INCOMPATIBLE_MUIC || mdev == ATTACHED_DEV_VZW_ACC_MUIC)
-					vps_update_supported_attr(mdev, true);
-				else
-					vps_update_supported_attr(mdev, false);
-			}
-#else
-				vps_update_supported_attr(mdev, false);
-#endif
-
+				vps_update_supported_attr(mdev, check_supported_unlessdt_list(mdev));
 		} else {
 			pr_err("%s: %c Undefined prop attribute.\n", __func__, prop_buf[0]);
 		}

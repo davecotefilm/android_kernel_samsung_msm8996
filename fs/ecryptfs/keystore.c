@@ -1226,7 +1226,7 @@ decrypt_pki_encrypted_session_key(struct ecryptfs_auth_tok *auth_tok,
 	memcpy(crypt_stat->key, auth_tok->session_key.decrypted_key,
 	       auth_tok->session_key.decrypted_key_size);
 	crypt_stat->key_size = ecryptfs_get_key_size_to_restore_key(
-			auth_tok->session_key.decrypted_key_size, full_cipher);
+			auth_tok->session_key.decrypted_key_size, crypt_stat);
 
 	ecryptfs_parse_full_cipher(full_cipher,
 		crypt_stat->cipher, crypt_stat->cipher_mode);
@@ -1238,7 +1238,7 @@ decrypt_pki_encrypted_session_key(struct ecryptfs_auth_tok *auth_tok,
 				  crypt_stat->key_size);
 
 		ecryptfs_dump_salt_hex(crypt_stat->key, crypt_stat->key_size,
-				full_cipher);
+				crypt_stat);
 	}
 out:
 	kfree(msg);
@@ -1511,7 +1511,7 @@ parse_tag_3_packet(struct ecryptfs_crypt_stat *crypt_stat,
 		crypt_stat->key_size =
 			ecryptfs_get_key_size_to_restore_key(
 			(*new_auth_tok)->session_key.encrypted_key_size,
-			full_cipher);
+			crypt_stat);
 
 	}
 	rc = ecryptfs_init_crypt_ctx(crypt_stat);
@@ -1711,8 +1711,6 @@ static int
 decrypt_passphrase_encrypted_session_key(struct ecryptfs_auth_tok *auth_tok,
 					 struct ecryptfs_crypt_stat *crypt_stat)
 {
-
-	unsigned char final[2*ECRYPTFS_MAX_CIPHER_NAME_SIZE+1];
 	struct scatterlist dst_sg[2];
 	struct scatterlist src_sg[2];
 	struct mutex *tfm_mutex;
@@ -1830,9 +1828,7 @@ decrypt_passphrase_encrypted_session_key(struct ecryptfs_auth_tok *auth_tok,
 		ecryptfs_dump_hex(crypt_stat->key,
 				  crypt_stat->key_size);
 		ecryptfs_dump_salt_hex(crypt_stat->key, crypt_stat->key_size,
-				ecryptfs_get_full_cipher(crypt_stat->cipher,
-					crypt_stat->cipher_mode,
-					final, sizeof(final)));
+				crypt_stat);
 	}
 out:
 	return rc;
@@ -2436,10 +2432,7 @@ write_tag_3_packet(char *dest, size_t *remaining_bytes,
 	ecryptfs_printk(KERN_DEBUG, "Encrypting [%zd] bytes of the key\n",
 		crypt_stat->key_size);
 	ecryptfs_printk(KERN_DEBUG, "Encrypting [%zd] bytes of the salt key\n",
-		ecryptfs_get_salt_size_for_cipher(
-			ecryptfs_get_full_cipher(crypt_stat->cipher,
-				crypt_stat->cipher_mode,
-				final, sizeof(final))));
+		ecryptfs_get_salt_size_for_cipher(crypt_stat));
 #ifdef CONFIG_CRYPTO_FIPS
 	if (crypt_stat->mount_crypt_stat->flags & ECRYPTFS_ENABLE_CC)
 		crypto_blkcipher_get_iv(desc.tfm, iv, ECRYPTFS_DEFAULT_IV_BYTES);

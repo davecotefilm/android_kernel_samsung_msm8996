@@ -29,7 +29,6 @@
 #define __MAX77854_H__
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
-#include <linux/battery/sec_charging_common.h>
 
 #define MFD_DEV_NAME "max77854"
 #define M2SH(m) ((m) & 0x0F ? ((m) & 0x03 ? ((m) & 0x01 ? 0 : 1) : ((m) & 0x04 ? 2 : 3)) : \
@@ -57,11 +56,6 @@ struct max77854_platform_data {
 	int irq_gpio;
 	bool wakeup;
 	struct muic_platform_data *muic_pdata;
-
-#if defined(CONFIG_CHARGER_MAX77854) && defined(CONFIG_FUELGAUGE_MAX77854)
-	sec_charger_platform_data_t *charger_data;
-	sec_fuelgauge_platform_data_t *fuelgauge_data;
-#endif
 
 	int num_regulators;
 	struct max77854_regulator_data *regulators;

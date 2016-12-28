@@ -33,6 +33,8 @@ enum cam_smmu_ops_param {
 	CAM_SMMU_DETACH,
 	CAM_SMMU_VOTE,
 	CAM_SMMU_DEVOTE,
+	CAM_SMMU_ATTACH_SECURE,
+	CAM_SMMU_DETACH_SECURE,
 	CAM_SMMU_OPS_INVALID
 };
 
@@ -162,5 +164,15 @@ void cam_smmu_reg_client_page_fault_handler(int handle,
 		int (*client_page_fault_handler)(struct iommu_domain *,
 		struct device *, unsigned long,
 		int, void*), void *token);
+
+
+int cam_smmu_get_phy_addr_secure_scratch(int handle,
+				  enum cam_smmu_map_dir dir,
+				  struct dma_buf *scratch_buf,
+				  dma_addr_t *paddr_ptr,
+				  size_t *len_ptr);
+
+int cam_smmu_put_phy_addr_secure_scratch(int handle,
+				  dma_addr_t paddr);
 
 #endif /* _CAM_SMMU_API_H_ */

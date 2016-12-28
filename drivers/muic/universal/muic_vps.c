@@ -77,11 +77,29 @@
 #define DEV_TYPE3_AV_WITH_VBUS		(0x1 << 4)
 #define DEV_TYPE3_NO_STD_CHG		(0x1 << 2)
 #define DEV_TYPE3_MHL			(0x1 << 0)
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+#define DEV_TYPE3_LO_TA			(0x1 << 5)
+#define DEV_TYPE3_CHG_TYPE	(DEV_TYPE3_U200_CHG | DEV_TYPE3_NO_STD_CHG | \
+				DEV_TYPE3_LO_TA)
+#else
 #define DEV_TYPE3_CHG_TYPE	(DEV_TYPE3_U200_CHG | DEV_TYPE3_NO_STD_CHG)
+#endif
 
 static struct vps_cfg cfg_MHL = {
 	.name = "MHL",
 	.attr = MATTR(VCOM_OPEN, VB_ANY)
+};
+static struct vps_cfg cfg_SEND = {
+	.name = "SEND",
+	.attr = MATTR(VCOM_AUDIO, VB_ANY)
+};
+static struct vps_cfg cfg_VOLDN = {
+	.name = "VOLDN",
+	.attr = MATTR(VCOM_AUDIO, VB_ANY)
+};
+static struct vps_cfg cfg_VOLUP = {
+	.name = "VOLUP",
+	.attr = MATTR(VCOM_AUDIO, VB_ANY)
 };
 static struct vps_cfg cfg_OTG = {
 	.name = "OTG",
@@ -148,6 +166,10 @@ static struct vps_cfg cfg_JIG_UART_ON = {
 	.name = "Jig UART On",
 	.attr = MATTR(VCOM_UART, VB_ANY) | MATTR_FACT_SUPP,
 };
+static struct vps_cfg cfg_EARJACK = {
+	.name = "EARJACK",
+	.attr = MATTR(VCOM_AUDIO, VB_ANY),
+};
 static struct vps_cfg cfg_TA = {
 	.name = "TA",
 	.attr = MATTR(VCOM_OPEN, VB_HIGH) | MATTR_CDET_SUPP,
@@ -168,6 +190,9 @@ static struct vps_cfg cfg_UNDEFINED_CHARGING = {
 static struct vps_tbl_data vps_table[] = {
 	[MDEV(OTG)]			= {0x00, "GND",	&cfg_OTG,},
 	[MDEV(MHL)]			= {0xfe, "1K",		&cfg_MHL,},
+	[MDEV(SEND)]			= {0x01, "2K",		&cfg_SEND,},
+	[MDEV(VOLDN)]			= {0x0a, "14.46K",	&cfg_VOLDN,},
+	[MDEV(VOLUP)]			= {0x0b, "17.26K",	&cfg_VOLUP,},
 	/* 0x01 ~ 0x0D : Remote Sx Button */
 	[MDEV(VZW_ACC)]		= {0x0e, "28.7K",	&cfg_VZW_ACC,},
 	[MDEV(VZW_INCOMPATIBLE)]	= {0x0f, "34K",	&cfg_VZW_INCOMPATIBLE,},
@@ -185,7 +210,7 @@ static struct vps_tbl_data vps_table[] = {
 	[MDEV(TYPE2_CHG)]		= {0x1b, "442K",	&cfg_TYPE2_CHG,},
 	[MDEV(JIG_UART_OFF)]		= {0x1c, "523K",	&cfg_JIG_UART_OFF,},
 	[MDEV(JIG_UART_ON)]		= {0x1d, "619K",	&cfg_JIG_UART_ON,},
-	/* 0x1e: Audio Mode with Remote */
+	[MDEV(EARJACK)]			= {0x1e, "1M",		&cfg_EARJACK,},
 	[MDEV(TA)]			= {0x1f, "OPEN",	&cfg_TA,},
 	[MDEV(USB)]			= {0x1f, "OPEN",	&cfg_USB,},
 	[MDEV(CDP)]			= {0x1f, "OPEN",	&cfg_CDP,},
@@ -196,9 +221,10 @@ static struct vps_tbl_data vps_table[] = {
 static bool mdev_undefined_range(int adc)
 {
 	switch (adc) {
-	case ADC_SEND_END ... ADC_REMOTE_S12:
+	case ADC_REMOTE_S1 ... ADC_REMOTE_S8:
+	case ADC_REMOTE_S11:
+	case ADC_REMOTE_S12:
 	case ADC_UART_CABLE:
-	case ADC_AUDIOMODE_W_REMOTE:
 		return true;
 	default:
 		break;
@@ -216,6 +242,17 @@ static bool vps_is_acceptable(muic_data_t *pmuic, int adc)
 			return false;
 	} else if (pmuic->attached_dev == ATTACHED_DEV_GAMEPAD_MUIC) {
 		if ((adc == ADC_OPEN) || (adc == ADC_GAMEPAD) || (adc == ADC_GND))
+			return true;
+		else
+			return false;
+	} else if (pmuic->attached_dev == ATTACHED_DEV_USB_LANHUB_MUIC) {
+		if ((adc == ADC_OPEN) || (adc == ADC_USB_LANHUB) || (adc == ADC_GND))
+			return true;
+		else
+			return false;
+	} else if (pmuic->attached_dev == ATTACHED_DEV_EARJACK_MUIC) {
+		if ((adc == ADC_OPEN) || (adc == ADC_EARJACK) || (adc == ADC_SEND_END) ||
+				(adc == ADC_BUTTON_VOLUP) || (adc == ADC_BUTTON_VOLDN))
 			return true;
 		else
 			return false;
@@ -343,10 +380,6 @@ int resolve_twin_mdev(int mdev, bool vbus)
 			pr_info("%s: mdev:%d vbus:%d\n",__func__, mdev, vbus);
 			return MDEV(DESKDOCK_VB);
 		}
-		else if (mdev == MDEV(JIG_UART_ON)) {
-			pr_info("%s: mdev:%d vbus:%d\n",__func__, mdev, vbus);
-			return MDEV(JIG_UART_ON_VB);
-		}
 	}
 
 	return 0;
@@ -448,8 +481,9 @@ int vps_find_attached_dev(muic_data_t *pmuic, muic_attached_dev_t *pdev, int *pi
 	pr_debug("%s\n",__func__);
 
 
-	if (pmuic->discard_interrupt) {
+	if (pmuic->discard_interrupt && pmsr->t.adc == ADC_OPEN) {
 		pr_info("%s:%s Under ADC mode change.\n", MUIC_DEV_NAME, __func__);
+		pmuic->discard_interrupt = false;
 		return -1;
 	}
 

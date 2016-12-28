@@ -512,6 +512,14 @@ struct usb_composite_dev {
 
 	/* protects deactivations and delayed_status counts*/
 	spinlock_t			lock;
+	
+	#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	/* used by enable_store function of android.c
+	 * to avoid signalling switch changes
+	 */
+	bool				mute_switch;
+	bool				force_disconnect;
+	#endif
 };
 
 extern int usb_string_id(struct usb_composite_dev *c);

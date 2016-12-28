@@ -42,10 +42,6 @@
 
 #include "mm.h"
 
-#ifdef CONFIG_RKP_KDP
-__attribute__((section (".rkp.prot.page"))) int rkp_cred_enable = 0;
-EXPORT_SYMBOL(rkp_cred_enable);
-#endif /*CONFIG_RKP_KDP*/
 
 /*
  * Empty_zero_page is a special page that is used for zero-initialized data

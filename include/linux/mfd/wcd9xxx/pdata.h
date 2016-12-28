@@ -171,11 +171,20 @@ struct wcd9xxx_regulator {
 	struct regulator *regulator;
 };
 
+#define MAX_IMPEDANCE_TALBE 7
+
+struct wcd9xxx_gain_table {
+	uint32_t min;      /* Min impedance */
+	uint32_t max;      /* Max impedance */
+	int gain;   /* additional gain */
+};
+
 struct wcd9xxx_pdata {
 	int irq;
 	int irq_base;
 	int num_irqs;
 	int reset_gpio;
+	struct device_node *wcd_rst_np;
 	struct wcd9xxx_amic amic_settings;
 	struct slim_device slimbus_slave_device;
 	struct wcd9xxx_micbias_setting micbias;
@@ -186,6 +195,7 @@ struct wcd9xxx_pdata {
 	u32 mad_dmic_sample_rate;
 	enum codec_variant cdc_variant;
 	u16 use_pinctrl;
+	struct wcd9xxx_gain_table imp_table[MAX_IMPEDANCE_TALBE];
 };
 
 #endif

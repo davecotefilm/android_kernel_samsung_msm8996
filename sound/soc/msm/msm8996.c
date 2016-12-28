@@ -211,11 +211,7 @@ static int msm8996_wsa881x_init(struct snd_soc_component *component);
 static struct wcd_mbhc_config wcd_mbhc_cfg = {
 	.read_fw_bin = false,
 	.calibration = NULL,
-#if defined(CONFIG_SEC_FACTORY)
 	.detect_extn_cable = false,
-#else
-	.detect_extn_cable = true,
-#endif
 	.mono_stero_detection = false,
 	.swap_gnd_mic = NULL,
 	.hs_ext_micbias = true,
@@ -2198,6 +2194,9 @@ static void *def_tasha_mbhc_cal(void)
 	void *tasha_wcd_cal;
 	struct wcd_mbhc_btn_detect_cfg *btn_cfg;
 	u16 *btn_high;
+	int i;
+	int ret;
+	struct of_phandle_args args;
 
 	tasha_wcd_cal = kzalloc(WCD_MBHC_CAL_SIZE(WCD_MBHC_DEF_BUTTONS,
 				WCD9XXX_MBHC_DEF_RLOADS), GFP_KERNEL);
@@ -2217,25 +2216,20 @@ static void *def_tasha_mbhc_cal(void)
 	btn_high = ((void *)&btn_cfg->_v_btn_low) +
 		(sizeof(btn_cfg->_v_btn_low[0]) * btn_cfg->num_btn);
 
+	for (i = 0; i < WCD_MBHC_DEF_BUTTONS; i++) {
+		ret = of_parse_phandle_with_args(spdev->dev.of_node,
+			"mbhc-button-thres", "#list-det-cells", i, &args);
+		if(ret < 0) {
+			pr_err("%s: missing mbhc-button-thres in dt node\n", __func__);
+			break;
+		}
 #if !defined(CONFIG_SEC_FACTORY)
-	btn_high[0] = 13;
-	btn_high[1] = 88;
-	btn_high[2] = 138;
-	btn_high[3] = 225;
-	btn_high[4] = 450;
-	btn_high[5] = 470;
-	btn_high[6] = 470;
-	btn_high[7] = 650;
+		btn_high[i] = args.args[0];
 #else
-	btn_high[0] = 63;
-	btn_high[1] = 125;
-	btn_high[2] = 138;
-	btn_high[3] = 225;
-	btn_high[4] = 450;
-	btn_high[5] = 470;
-	btn_high[6] = 470;
-	btn_high[7] = 650;
-#endif
+		btn_high[i] = args.args[1];
+#endif /* !defined(CONFIG_SEC_FACTORY) */
+		pr_info("%s: btn_high[%d] = %d\n", __func__, i, btn_high[i]);
+	}
 
 	return tasha_wcd_cal;
 }
@@ -4185,6 +4179,9 @@ static int msm8996_asoc_machine_probe(struct platform_device *pdev)
 		dev_dbg(&pdev->dev, "msm8996_prepare_hifi failed (%d)\n",
 			ret);
 
+	if (of_property_read_bool(pdev->dev.of_node, "qcom,msm-mbhc-ldet-only"))
+		wcd_mbhc_cfg.gnd_det_en = false;
+
 	ret = snd_soc_register_card(card);
 	if (ret == -EPROBE_DEFER) {
 		if (codec_reg_done)
@@ -4236,6 +4233,20 @@ static int msm8996_asoc_machine_probe(struct platform_device *pdev)
 	if (ret)
 		dev_info(&pdev->dev, "msm8996_prepare_us_euro failed (%d)\n",
 			ret);
+
+	/* Samsung external cable ADC detection flag check */
+	if (of_find_property(pdev->dev.of_node, "detect-extn-cable", NULL))
+		wcd_mbhc_cfg.detect_extn_cable = true;
+	else
+		wcd_mbhc_cfg.detect_extn_cable = false;
+
+#if defined(CONFIG_SEC_FACTORY)
+	wcd_mbhc_cfg.detect_extn_cable = false;
+#endif
+
+	dev_dbg(&pdev->dev, "%s: external cable detection is %s supported\n",
+			__func__, wcd_mbhc_cfg.detect_extn_cable ? "" : "not ");
+
 	return 0;
 err:
 	if (pdata->us_euro_gpio > 0) {

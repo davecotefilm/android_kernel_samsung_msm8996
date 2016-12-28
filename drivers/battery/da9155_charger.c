@@ -16,6 +16,9 @@
  */
 
 #include <linux/battery/charger/da9155_charger.h>
+#if defined(CONFIG_BATTERY_NOTIFIER)
+#include <linux/battery/battery_notifier.h>
+#endif
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 
@@ -25,10 +28,6 @@
 #define DISABLE 0
 
 static enum power_supply_property da9155_charger_props[] = {
-	POWER_SUPPLY_PROP_HEALTH,				/* status */
-	POWER_SUPPLY_PROP_ONLINE,				/* buck enable/disable */
-	POWER_SUPPLY_PROP_CURRENT_MAX,			/* input current */
-	POWER_SUPPLY_PROP_CURRENT_NOW,			/* charge current */
 };
 
 static int da9155_read_reg(struct i2c_client *client, u8 reg, u8 *dest)
@@ -112,6 +111,12 @@ static int da9155_get_charger_health(struct da9155_charger_data *charger)
 {
 	u8 reg_data;
 
+	// 80s same with maxim IC
+	if (da9155_write_reg(charger->i2c, DA9155_TIMER_B, 0x50) < 0)
+	{
+		dev_info(charger->dev,
+				"%s: addr: 0x%x write fail\n", __func__, DA9155_TIMER_B);
+	}
 	da9155_charger_test_read(charger);
 
 	da9155_read_reg(charger->i2c, DA9155_STATUS_A, &reg_data);
@@ -202,40 +207,67 @@ static void da9155_charger_initialize(struct da9155_charger_data *charger)
 
 	/* unmasked: E_VIN_UV, E_VIN_DROP, E_VIN_OV	*/
 	da9155_update_reg(charger->i2c, DA9155_MASK_A,
-		DA9155_M_VIN_UV_MASK | DA9155_M_VIN_DROP_MASK | DA9155_M_VIN_OV_MASK,
-		DA9155_M_VIN_UV_MASK | DA9155_M_VIN_DROP_MASK | DA9155_M_VIN_OV_MASK);
+			DA9155_M_VIN_UV_MASK | DA9155_M_VIN_DROP_MASK | DA9155_M_VIN_OV_MASK,
+			0xFF);
+	da9155_update_reg(charger->i2c, DA9155_MASK_B, 0, 0xFF);
 
-	/* EN_BUCK: DISABLE, BUCK_ILIMIT: 5000mA */
-	da9155_update_reg(charger->i2c, DA9155_BUCK_CONT, 0, DA9155_BUCK_EN_MASK);
-	da9155_update_reg(charger->i2c, DA9155_BUCK_ILIM, 0x14, DA9155_BUCK_ILIM_MASK);
-
-	/* VBAT_OV: MAX(5.175V) */
-	da9155_update_reg(charger->i2c, DA9155_CONTROL_C, DA9155_VBAT_OV_MASK, DA9155_VBAT_OV_MASK);
-
-	/* Juntion temmperature 145C */
-	da9155_update_reg(charger->i2c, DA9155_CONTROL_E, DA9155_TJUNC_WARN_MASK, DA9155_TJUNC_WARN_MASK);
+	/* Safety timer enable */
+	da9155_update_reg(charger->i2c, DA9155_CONTROL_E, 0, DA9155_TIMER_DIS_MASK);
 }
 
 static irqreturn_t da9155_irq_handler(int irq, void *data)
 {
 	struct da9155_charger_data *charger = data;
-	u8 reg_data_a, reg_data_b;
+	u8 event_a, event_b;
 
-	pr_info("%s: \n", __func__);
+	dev_info(charger->dev,
+			"%s: \n", __func__);
 
-	if (!da9155_read_reg(charger->i2c, DA9155_EVENT_A, &reg_data_a) &&
-		!da9155_read_reg(charger->i2c, DA9155_EVENT_B, &reg_data_b)) {
-
-		pr_info("%s: EVENT_A(0x%x), EVENT_B(0x%x)\n",
-			__func__, reg_data_a, reg_data_b);
+	if (!da9155_read_reg(charger->i2c, DA9155_EVENT_A, &event_a) &&
+		!da9155_read_reg(charger->i2c, DA9155_EVENT_B, &event_b)) {
 
 		/* clear event reg */
-		da9155_update_reg(charger->i2c, DA9155_EVENT_A, 0xFF, 0xFF);
-		da9155_update_reg(charger->i2c, DA9155_EVENT_B, 0xFF, 0xFF);
+		da9155_write_reg(charger->i2c, DA9155_EVENT_A, event_a);
+		da9155_write_reg(charger->i2c, DA9155_EVENT_B, event_b);
+
+		dev_info(charger->dev,
+				"%s: EVENT_A(0x%x), EVENT_B(0x%x)\n",
+				__func__, event_a, event_b);
 	}
 
 	return IRQ_HANDLED;
 }
+
+#if defined(CONFIG_BATTERY_NOTIFIER)
+static int da9155_get_property(struct device * dev, int property)
+{
+	int ret;
+	u8 reg_data;
+	struct i2c_client *i2c = container_of(dev, struct i2c_client, dev);
+	struct da9155_charger_data *charger = i2c_get_clientdata(i2c);
+
+	switch (property) {
+	case CHECK_SLAVE_I2C:
+		ret = da9155_read_reg(charger->i2c, DA9155_EVENT_B, &reg_data);
+		if(ret < 0)
+			ret = 0;
+		else
+			ret = 1;
+		break;
+	default:
+		return -EINVAL;
+	}
+	pr_info("%s: property : %d\n", __func__,property);
+
+	return ret;
+}
+
+void da9155_set_battery_property(struct da9155_charger_data *charger)
+{
+	batt_cb.sub_chg_dev = charger->dev;
+	batt_cb.sub_chg_get_property = da9155_get_property;
+}
+#endif
 
 static int da9155_chg_get_property(struct power_supply *psy,
 	enum power_supply_property psp, union power_supply_propval *val)
@@ -278,8 +310,6 @@ static int da9155_chg_set_property(struct power_supply *psy,
 		charger->is_charging =
 			(val->intval == SEC_BAT_CHG_MODE_CHARGING) ? ENABLE : DISABLE;
 		da9155_set_charger_state(charger, charger->is_charging);
-		if (charger->is_charging == DISABLE)
-			da9155_set_charge_current(charger, 0);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		charger->charging_current = val->intval;
@@ -294,9 +324,9 @@ static int da9155_chg_set_property(struct power_supply *psy,
 			da9155_charger_initialize(charger);
 		}
 		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_STATUS:
 	case POWER_SUPPLY_PROP_CURRENT_FULL:
-	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_HEALTH:
@@ -308,8 +338,8 @@ static int da9155_chg_set_property(struct power_supply *psy,
 	return 0;
 }
 
-static int da9155_charger_parse_dt(struct device *dev,
-	sec_charger_platform_data_t *pdata)
+static int da9155_charger_parse_dt(struct da9155_charger_data *charger,
+	struct da9155_charger_platform_data *pdata)
 {
 	struct device_node *np = of_find_node_by_name(NULL, "da9155-charger");
 	int ret = 0;
@@ -328,70 +358,19 @@ static int da9155_charger_parse_dt(struct device *dev,
 			pr_info("%s: irq-gpio = %d\n", __func__, pdata->irq_gpio);
 		}
 	}
-
 	np = of_find_node_by_name(NULL, "battery");
 	if (!np) {
-		pr_err("%s np is NULL\n", __func__);
-		return -1;
-	}
-
-	return 0;
-}
-
-static int da9155_pinctrl_select(struct da9155_charger_data *charger, bool on) {
-	struct pinctrl_state *pins_i2c_state;
-
-	pins_i2c_state = on ? charger->i2c_gpio_state_active
-			    : charger->i2c_gpio_state_suspend;
-
-	if (!IS_ERR_OR_NULL(pins_i2c_state)) {
-		int ret =  pinctrl_select_state(charger->i2c_pinctrl, pins_i2c_state);
+		pr_err("%s np NULL\n", __func__);
+	} else {
+		ret = of_property_read_u32(np, "battery,chg_float_voltage",
+					   &charger->float_voltage);
 		if (ret) {
-			dev_err(charger->dev, "%s: Failed to set da9155 i2c pin state.\n", __func__);
-			return ret;
+			pr_info("%s: battery,chg_float_voltage is Empty\n", __func__);
+			charger->float_voltage = 42000;
 		}
 	}
 
-	return 0;
-}
-
-static int da9155_i2c_pinctrl_init(struct da9155_charger_data *charger) {
-	int ret = 0;
-	struct pinctrl *i2c_pinctrl;
-
-	charger->i2c_pinctrl = devm_pinctrl_get(&charger->i2c->dev);
-	if (IS_ERR_OR_NULL(charger->i2c_pinctrl)) {
-		dev_err(charger->dev, "%s: Failed to alloc mem for da9155 i2c pinctrl.\n", __func__);
-		ret = PTR_ERR(charger->i2c_pinctrl);
-		return -ENOMEM;
-	}
-
-	i2c_pinctrl = charger->i2c_pinctrl;
-
-	charger->i2c_gpio_state_active = pinctrl_lookup_state(i2c_pinctrl, "da9155_active");
-	if (IS_ERR_OR_NULL(charger->i2c_gpio_state_active)) {
-		dev_err(charger->dev, "%s: Failed to set active state for da9155 i2c\n", __func__);
-		ret = PTR_ERR(charger->i2c_gpio_state_active);
-		goto err_i2c_active_state;
-	}
-
-	charger->i2c_gpio_state_suspend = pinctrl_lookup_state(i2c_pinctrl, "da9155_suspend");
-	if (IS_ERR_OR_NULL(charger->i2c_gpio_state_suspend)) {
-		dev_err(charger->dev, "%s: Failed to set suspend state for da9155 i2c\n", __func__);
-		ret = PTR_ERR(charger->i2c_gpio_state_suspend);
-		goto err_i2c_suspend_state;
-	}
-
-#if defined(CONFIG_OF)
-	da9155_pinctrl_select(charger, true);
-#endif
 	return ret;
-
-err_i2c_suspend_state:
-	charger->i2c_gpio_state_suspend = 0;
-err_i2c_active_state:
-	charger->i2c_gpio_state_active = 0;
-	return -1;
 }
 
 static ssize_t da9155_store_addr(struct device *dev,
@@ -499,47 +478,33 @@ static int da9155_charger_probe(struct i2c_client *client,
 {
 	struct device_node *of_node = client->dev.of_node;
 	struct da9155_charger_data *charger;
-	sec_charger_platform_data_t *pdata = client->dev.platform_data;
+	struct da9155_charger_platform_data *pdata = client->dev.platform_data;
 	int ret = 0;
 
 	pr_info("%s: DA9155 Charger Driver Loading\n", __func__);
 
-	if (of_node) {
-		pdata = devm_kzalloc(&client->dev, sizeof(*pdata), GFP_KERNEL);
-		if (!pdata) {
-			pr_err("%s: Failed to allocate memory\n", __func__);
-			return -ENOMEM;
-		}
-		ret = da9155_charger_parse_dt(&client->dev, pdata);
-		if (ret < 0)
-			goto err_parse_dt;
-	} else {
-		pdata = client->dev.platform_data;
-	}
-
 	charger = kzalloc(sizeof(*charger), GFP_KERNEL);
 	if (!charger) {
 		pr_err("%s: Failed to allocate memory\n", __func__);
-		ret = -ENOMEM;
-		goto err_nomem;
+		return -ENOMEM;
 	}
 
 	mutex_init(&charger->io_lock);
 	charger->dev = &client->dev;
-	ret = i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA |
-		I2C_FUNC_SMBUS_WORD_DATA | I2C_FUNC_SMBUS_I2C_BLOCK);
-	if (!ret) {
-		ret = i2c_get_functionality(client->adapter);
-		dev_err(charger->dev, "I2C functionality is not supported.\n");
-		ret = -ENOSYS;
-		goto err_i2cfunc_not_support;
-	}
 	charger->i2c = client;
+	if (of_node) {
+		pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
+		if (!pdata) {
+			pr_err("%s: Failed to allocate memory\n", __func__);
+			ret = -ENOMEM;
+			goto err_nomem;
+		}
+		ret = da9155_charger_parse_dt(charger, pdata);
+		if (ret < 0)
+			goto err_parse_dt;
+	}
 	charger->pdata = pdata;
 	i2c_set_clientdata(client, charger);
-
-	if (da9155_i2c_pinctrl_init(charger) < 0)
-		dev_err(charger->dev, "i2c_pinctrl is failed\n");
 
 	charger->psy_chg.name			= "da9155-charger";
 	charger->psy_chg.type			= POWER_SUPPLY_TYPE_UNKNOWN;
@@ -558,14 +523,6 @@ static int da9155_charger_probe(struct i2c_client *client,
 		goto err_power_supply_register;
 	}
 
-	charger->wqueue =
-		create_singlethread_workqueue(dev_name(charger->dev));
-	if (!charger->wqueue) {
-		pr_err("%s: Fail to Create Workqueue\n", __func__);
-		ret = -1;
-		goto err_create_wqueue;
-	}
-
 	if (pdata->irq_gpio) {
 		charger->chg_irq = gpio_to_irq(pdata->irq_gpio);
 
@@ -577,12 +534,11 @@ static int da9155_charger_probe(struct i2c_client *client,
 			pr_err("%s: Failed to Request IRQ(%d)\n", __func__, ret);
 			goto err_req_irq;
 		}
-
-		ret = enable_irq_wake(charger->chg_irq);
-		if (ret < 0)
-			pr_err("%s: Failed to Enable Wakeup Source(%d)\n",
-				__func__, ret);
 	}
+	device_init_wakeup(charger->dev, 1);
+#if defined(CONFIG_BATTERY_NOTIFIER)
+	da9155_set_battery_property(charger);
+#endif
 
 	ret = sysfs_create_group(&charger->psy_chg.dev->kobj, &da9155_attr_group);
 	if (ret) {
@@ -594,15 +550,13 @@ static int da9155_charger_probe(struct i2c_client *client,
 	return 0;
 
 err_req_irq:
-err_create_wqueue:
 	power_supply_unregister(&charger->psy_chg);
 err_power_supply_register:
-err_i2cfunc_not_support:
-	mutex_destroy(&charger->io_lock);
-	kfree(charger);
-err_nomem:
 err_parse_dt:
 	kfree(pdata);
+err_nomem:
+	mutex_destroy(&charger->io_lock);
+	kfree(charger);
 
 	return ret;
 }
@@ -611,8 +565,8 @@ static int da9155_charger_remove(struct i2c_client *client)
 {
 	struct da9155_charger_data *charger = i2c_get_clientdata(client);
 
-	free_irq(charger->chg_irq, NULL);
-	destroy_workqueue(charger->wqueue);
+	if (charger->chg_irq)
+		free_irq(charger->chg_irq, charger);
 	power_supply_unregister(&charger->psy_chg);
 	mutex_destroy(&charger->io_lock);
 	kfree(charger->pdata);
@@ -623,6 +577,10 @@ static int da9155_charger_remove(struct i2c_client *client)
 
 static void da9155_charger_shutdown(struct i2c_client *client)
 {
+	struct da9155_charger_data *charger = i2c_get_clientdata(client);
+
+	if (charger->chg_irq)
+		free_irq(charger->chg_irq, charger);
 	da9155_update_reg(client, DA9155_BUCK_CONT, 0, DA9155_BUCK_EN_MASK);
 	da9155_update_reg(client, DA9155_BUCK_IOUT, 0x7D, DA9155_BUCK_ILIM_MASK);
 }
@@ -642,10 +600,51 @@ static struct of_device_id da9155_charger_match_table[] = {
 #define da9155_charger_match_table NULL
 #endif
 
+#if defined(CONFIG_PM)
+static int da9155_charger_suspend(struct device *dev)
+{
+	struct i2c_client *i2c = container_of(dev, struct i2c_client, dev);
+	struct da9155_charger_data *charger = i2c_get_clientdata(i2c);
+
+	if (charger->chg_irq) {
+		if (device_may_wakeup(dev))
+			enable_irq_wake(charger->chg_irq);
+		disable_irq(charger->chg_irq);
+	}
+
+	return 0;
+}
+
+static int da9155_charger_resume(struct device *dev)
+{
+	struct i2c_client *i2c = container_of(dev, struct i2c_client, dev);
+	struct da9155_charger_data *charger = i2c_get_clientdata(i2c);
+
+	if (charger->chg_irq) {
+		if (device_may_wakeup(dev))
+			disable_irq_wake(charger->chg_irq);
+		enable_irq(charger->chg_irq);
+	}
+
+	return 0;
+}
+#else
+#define da9155_charger_suspend		NULL
+#define da9155_charger_resume		NULL
+#endif /* CONFIG_PM */
+
+const struct dev_pm_ops da9155_pm = {
+	.suspend = da9155_charger_suspend,
+	.resume = da9155_charger_resume,
+};
+
 static struct i2c_driver da9155_charger_driver = {
 	.driver = {
 		.name	= "da9155-charger",
 		.owner	= THIS_MODULE,
+#if defined(CONFIG_PM)
+		.pm	= &da9155_pm,
+#endif /* CONFIG_PM */
 		.of_match_table = da9155_charger_match_table,
 	},
 	.probe		= da9155_charger_probe,

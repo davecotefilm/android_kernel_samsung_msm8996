@@ -1404,8 +1404,7 @@ static int mmc_select_cmdq(struct mmc_card *card)
 		mmc_card_clr_cmdq(card);
 		ret = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL, EXT_CSD_CMDQ, 0,
 				 card->ext_csd.generic_cmd6_time);
-		if (ret)
-			goto out;
+		goto out;
 	}
 
 	mmc_host_clk_release(card->host);
@@ -2176,7 +2175,7 @@ int mmc_send_pon(struct mmc_card *card)
 	if (!mmc_can_poweroff_notify(card))
 		goto out;
 
-	mmc_claim_host(host);
+	mmc_get_card(card);
 	if (card->pon_type & MMC_LONG_PON)
 		err = mmc_poweroff_notify(host->card, EXT_CSD_POWER_OFF_LONG);
 	else if (card->pon_type & MMC_SHRT_PON)
@@ -2184,7 +2183,7 @@ int mmc_send_pon(struct mmc_card *card)
 	if (err)
 		pr_warn("%s: error %d sending PON type %u",
 			mmc_hostname(host), err, card->pon_type);
-	mmc_release_host(host);
+	mmc_put_card(card);
 out:
 	return err;
 }
@@ -2598,6 +2597,10 @@ static int mmc_runtime_resume(struct mmc_host *host)
 	return err;
 }
 
+/*
+ * mmc_power_restore: Must be called with claim_host
+ * acquired by the caller.
+ */
 static int mmc_power_restore(struct mmc_host *host)
 {
 	int ret;
@@ -2611,9 +2614,7 @@ static int mmc_power_restore(struct mmc_host *host)
 		return ret;
 	}
 
-	mmc_claim_host(host);
 	ret = mmc_init_card(host, host->card->ocr, host->card);
-	mmc_release_host(host);
 
 	ret = mmc_resume_clk_scaling(host);
 	if (ret)

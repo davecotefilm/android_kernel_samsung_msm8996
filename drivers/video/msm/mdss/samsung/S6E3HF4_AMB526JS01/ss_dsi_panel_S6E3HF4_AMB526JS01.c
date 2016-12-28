@@ -354,6 +354,8 @@ static struct dsi_panel_cmds *mdss_hbm_etc(struct mdss_dsi_ctrl_pdata *ctrl, int
 		return NULL;
 	}
 
+	elvss_3th_val = elvss_23th_val = 0;
+
 	/* OTP value - B5 23th */
 	elvss_23th_val = vdd->display_status_dsi[ctrl->ndx].elvss_value1;
 
@@ -423,13 +425,6 @@ static struct dsi_panel_cmds *mdss_hbm_etc(struct mdss_dsi_ctrl_pdata *ctrl, int
 		vdd->dtsi_data[ctrl->ndx].hbm_etc_tx_cmds[vdd->panel_revision].cmds[5].payload[4] = 0x0A; /* 0x0A : 8% */
 
 	vdd->dtsi_data[ctrl->ndx].hbm_etc_tx_cmds[vdd->panel_revision].cmds[6].payload[1] = 0x02; /* ALC ON */
-
-	/* ACL off - Gallery 255 level (LDU/CCB) */
-	if (vdd->weakness_hbm_comp == 2) {
-		if ((vdd->color_weakness_mode && (vdd->ccb_bl_backup == 255)) ||
-			(vdd->ldu_correction_state && (vdd->ldu_bl_backup == 255)))
-				vdd->dtsi_data[ctrl->ndx].hbm_etc_tx_cmds[vdd->panel_revision].cmds[6].payload[1] = 0x00; /* ALC OFF */
-	}
 
 	*level_key = PANEL_LEVE1_KEY;
 
@@ -719,74 +714,6 @@ end :
 	return NULL;
 }
 
-static int mdss_force_acl_on(struct mdss_dsi_ctrl_pdata *ctrl)
-{
-	struct samsung_display_driver_data *vdd = check_valid_ctrl(ctrl);
-	int acl_on;
-	int bl_level;
-
-	if (IS_ERR_OR_NULL(vdd)) {
-		LCD_ERR("Invalid data ctrl : 0x%zx vdd : 0x%zx", (size_t)ctrl, (size_t)vdd);
-		return false;
-	}
-
-	/* acl is always on */
-	acl_on = 1;
-
-	/* Gallery Max brightness */
-	if (vdd->color_weakness_mode)
-		bl_level = vdd->ccb_bl_backup;
-	else if (vdd->ldu_correction_state)
-		bl_level = vdd->ldu_bl_backup;
-	else
-		bl_level = vdd->bl_level;
-
-	/* Gallery Max brightness */
-	if ((vdd->weakness_hbm_comp == 2) && (vdd->bl_level == 255))
-		acl_on = 0;
-
-	return acl_on;
-}
-
-static int mdss_set_gradual_acl_status(struct mdss_dsi_ctrl_pdata *ctrl, int acl_on)
-{
-	struct samsung_display_driver_data *vdd = check_valid_ctrl(ctrl);
-	int step_array[4] = {4,8,12,15}; /* 3% 6% 9% 12% */
-	int step_size = sizeof(step_array)/sizeof(int);
-	int i;
-
-	if (vdd->gradual_acl_status != GRADUAL_ACL_UNSTABLE &&
-		vdd->gradual_pre_acl_on != acl_on) {
-		vdd->gradual_acl_update = true;
-
-		if (acl_on) {
-			vdd->gradual_acl_status = GRADUAL_ACL_ON;
-/*
-			vdd->dtsi_data[ctrl->ndx].gradual_acl_tx_cmds[vdd->panel_revision].cmds[0].payload[1] = 0x50;
-			for (i=0; i<step_size; i++) {
-				LCD_INFO("GRADUAL_ACL UP (%x)\n", i);
-				vdd->dtsi_data[ctrl->ndx].gradual_acl_tx_cmds[vdd->panel_revision].cmds[0].payload[4] = step_array[i];
-				mdss_samsung_send_cmd(ctrl, PANEL_GRADUAL_ACL);
-			}
-*/
-		} else {
-			vdd->gradual_acl_status = GRADUAL_ACL_OFF;
-			vdd->dtsi_data[ctrl->ndx].gradual_acl_tx_cmds[vdd->panel_revision].cmds[0].payload[1] = 0x40;
-			for (i=step_size-1; i>=0; i--) {
-				LCD_INFO("GRADUAL_ACL DOWN (%x)\n", i);
-				vdd->dtsi_data[ctrl->ndx].gradual_acl_tx_cmds[vdd->panel_revision].cmds[0].payload[4] = step_array[i];
-				mdss_samsung_send_cmd(ctrl, PANEL_GRADUAL_ACL);
-			}
-		}
-
-		vdd->gradual_acl_update = false;
-	}
-
-	vdd->gradual_pre_acl_on = acl_on;
-
-	return 0;
-}
-
 static struct dsi_panel_cmds * mdss_acl_on(struct mdss_dsi_ctrl_pdata *ctrl, int *level_key)
 {
 	struct samsung_display_driver_data *vdd = check_valid_ctrl(ctrl);
@@ -797,6 +724,9 @@ static struct dsi_panel_cmds * mdss_acl_on(struct mdss_dsi_ctrl_pdata *ctrl, int
 	}
 
 	*level_key = PANEL_LEVE1_KEY;
+
+	if (vdd->gradual_acl_val)
+		vdd->dtsi_data[ctrl->ndx].acl_on_tx_cmds[vdd->panel_revision].cmds[0].payload[4] = vdd->gradual_acl_val;
 
 	return &(vdd->dtsi_data[ctrl->ndx].acl_on_tx_cmds[vdd->panel_revision]);
 }
@@ -2398,6 +2328,77 @@ static void mdss_get_panel_lpm_mode(struct mdss_dsi_ctrl_pdata *ctrl, u8 *mode)
 	mdss_update_panel_lpm_cmds(ctrl, lpm_bl_level, panel_lpm_mode);
 }
 
+static int ddi_hw_cursor(struct mdss_dsi_ctrl_pdata *ctrl, int *input)
+{
+	struct samsung_display_driver_data *vdd = check_valid_ctrl(ctrl);
+	char *payload;
+
+	if (IS_ERR_OR_NULL(ctrl)) {
+		LCD_ERR("dsi_ctrl is NULL\n");
+		return 0;
+	}
+
+	if (IS_ERR_OR_NULL(vdd)) {
+		LCD_ERR("Invalid data ctrl : 0x%zx vdd : 0x%zx", (size_t)ctrl, (size_t)vdd);
+		return 0;
+	}
+
+	if (IS_ERR_OR_NULL(input)) {
+		LCD_ERR("input is NULL\n");
+		return 0;
+	}
+
+	if (IS_ERR_OR_NULL(vdd->dtsi_data[ctrl->ndx].hw_cursor_tx_cmds[vdd->panel_revision].cmds[0].payload)) {
+		LCD_ERR("hw_cursor_tx_cmds is NULL\n");
+		return 0;
+	}
+
+
+	LCD_INFO("On/Off:(%d), Por/Land:(%d), On_Select:(%d), X:(%d), Y:(%d), Width:(%d), Length:(%d), Color:(0x%x), Period:(%x), TR_TIME(%x)\n",
+		input[0], input[1], input[2], input[3], input[4], input[5],
+		input[6], input[7], input[8], input[9]);
+
+	payload = vdd->dtsi_data[ctrl->ndx].hw_cursor_tx_cmds[vdd->panel_revision].cmds[0].payload;
+
+	/* Cursor On&Off (0:Off, 1:On) */
+	payload[1] = input[0] & 0x1;
+
+	/* 3rd bit : CURSOR_ON_SEL, 2nd bit : Port/Land, 1st bit : BLINK_ON(Default On)*/
+	payload[2] = (input[2] & 0x1) << 2 | (input[1] & 0x1) << 1 | 0x1;
+
+	/* Start X address */
+	payload[3] = (input[3] & 0x700) >> 8;
+	payload[4] = input[3] & 0xFF;
+
+	/* Start Y address */
+	payload[5] = (input[4] & 0x700) >> 8;
+	payload[6] = input[4] & 0xFF;
+
+	/* Width */
+	payload[7] = input[5] & 0xF;
+
+	/* Length */
+	payload[8] = (input[6] & 0x100) >> 8;
+	payload[9] = input[6] & 0xFF;
+
+	/* Color */
+	payload[10] = (input[7] & 0xFF0000) >> 16;
+	payload[11] = (input[7] & 0xFF00) >> 8;
+	payload[12] = input[7] & 0xFF;
+
+	/* Period */
+	payload[13] = input[8] & 0xFF;
+
+	/* TR_TIME */
+	payload[14] = input[9] & 0xFF;
+
+	mdss_samsung_send_cmd(ctrl, PANEL_LEVE1_KEY_ENABLE);
+	mdss_samsung_send_cmd(ctrl, PANEL_HW_CURSOR);
+	mdss_samsung_send_cmd(ctrl, PANEL_LEVE1_KEY_DISABLE);
+
+	return 1;
+}
+
 static int parse_basic_data(char *buf)
 {
 	int ret;
@@ -2972,260 +2973,6 @@ end:
 	return ret;
 }
 
-static unsigned int br_tbl_LDU[7][256] = {
-	{
-		2, 3, 4, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 17,
-		19, 21, 21, 22, 24, 24, 27, 27, 30, 30, 32, 34, 34, 34, 37, 37,
-		41, 41, 44, 44, 44, 50, 50, 53, 53, 53, 56, 56, 60, 60, 64, 64,
-		68, 68, 68, 72, 72, 72, 77, 77, 77, 82, 82, 87, 87, 87, 87, 93,
-		93, 93, 98, 98, 98, 98, 105, 105, 105, 105, 111, 111, 111, 119, 119, 119,
-		119, 126, 126, 126, 126, 134, 134, 134, 134, 134, 143, 143, 143, 143, 143, 152,
-		152, 152, 152, 152, 162, 162, 162, 162, 162, 172, 172, 172, 172, 172, 172, 183,
-		183, 183, 183, 183, 183, 195, 195, 195, 195, 195, 207, 207, 207, 207, 207, 207,
-		207, 220, 220, 220, 220, 220, 220, 220, 234, 234, 234, 234, 234, 234, 234, 249,
-		249, 249, 249, 249, 249, 249, 265, 265, 265, 265, 265, 265, 265, 265, 282, 282,
-		282, 282, 282, 282, 282, 282, 300, 300, 300, 300, 300, 300, 300, 300, 300, 316,
-		316, 316, 316, 316, 316, 316, 316, 316, 333, 333, 333, 333, 333, 333, 333, 333,
-		333, 333, 350, 350, 350, 350, 350, 350, 350, 350, 372, 372, 372, 372, 372, 372,
-		372, 372, 372, 387, 387, 387, 387, 387, 387, 387, 387, 387, 395, 395, 395, 395,
-		403, 403, 403, 403, 412, 412, 412, 420, 420, 420, 420, 420, 420, 420, 420, 420,
-		420, 420, 420, 443, 443, 443, 443, 443, 443, 443, 443, 465, 465, 465, 465, 465,
-	},
-	{
-		2, 3, 5, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 19,
-		20, 22, 22, 24, 24, 25, 27, 29, 32, 32, 34, 34, 37, 37, 39, 39,
-		44, 44, 44, 47, 47, 50, 50, 56, 56, 56, 60, 60, 60, 60, 64, 64,
-		68, 68, 68, 72, 72, 72, 77, 77, 77, 82, 82, 87, 87, 87, 87, 93,
-		93, 93, 98, 98, 98, 98, 111, 111, 111, 111, 111, 111, 111, 119, 119, 119,
-		119, 126, 126, 126, 126, 134, 134, 134, 134, 134, 143, 143, 143, 143, 143, 152,
-		152, 152, 152, 152, 162, 162, 162, 162, 162, 172, 172, 172, 172, 172, 172, 183,
-		183, 183, 183, 183, 183, 195, 195, 195, 195, 195, 207, 207, 207, 207, 207, 207,
-		207, 220, 220, 220, 220, 220, 220, 220, 234, 234, 234, 234, 234, 234, 234, 249,
-		249, 249, 249, 249, 249, 249, 265, 265, 265, 265, 265, 265, 265, 265, 282, 282,
-		282, 282, 282, 282, 282, 282, 300, 300, 300, 300, 300, 300, 300, 300, 300, 333,
-		333, 333, 333, 333, 333, 333, 333, 333, 350, 350, 350, 350, 350, 350, 350, 350,
-		350, 350, 365, 365, 365, 365, 365, 365, 365, 365, 387, 387, 387, 387, 387, 387,
-		387, 387, 387, 403, 403, 403, 403, 403, 403, 403, 403, 403, 412, 412, 412, 412,
-		420, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420, 443, 443, 443, 443, 443,
-		443, 443, 443, 465, 465, 465, 465, 465, 465, 465, 465, 488, 488, 488, 488, 488,
-	},
-	{
-		2, 4, 5, 5, 6, 7, 9, 10, 11, 12, 13, 15, 16, 17, 19, 19,
-		21, 24, 24, 24, 25, 27, 29, 30, 32, 32, 34, 37, 39, 39, 41, 41,
-		44, 44, 47, 50, 50, 53, 53, 56, 56, 56, 60, 60, 64, 64, 68, 68,
-		72, 72, 72, 77, 77, 77, 82, 82, 82, 87, 87, 93, 93, 93, 93, 98,
-		98, 98, 105, 105, 105, 105, 111, 111, 111, 111, 119, 119, 119, 126, 126, 126,
-		126, 134, 134, 134, 134, 143, 143, 143, 143, 143, 152, 152, 152, 152, 152, 162,
-		162, 162, 162, 162, 172, 172, 172, 172, 172, 183, 183, 183, 183, 183, 183, 195,
-		195, 195, 195, 195, 195, 207, 207, 207, 207, 207, 220, 220, 220, 220, 220, 220,
-		220, 234, 234, 234, 234, 234, 234, 234, 249, 249, 249, 249, 249, 249, 249, 265,
-		265, 265, 265, 265, 265, 265, 282, 282, 282, 282, 282, 282, 282, 282, 300, 300,
-		300, 300, 300, 300, 300, 300, 316, 316, 316, 316, 316, 316, 316, 316, 316, 350,
-		350, 350, 350, 350, 350, 350, 350, 350, 365, 365, 365, 365, 365, 365, 365, 365,
-		365, 365, 387, 387, 387, 387, 387, 387, 387, 387, 403, 403, 403, 403, 403, 403,
-		403, 403, 403, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420,
-		443, 443, 443, 443, 443, 443, 443, 443, 443, 443, 443, 465, 465, 465, 465, 465,
-		465, 465, 465, 488, 488, 488, 488, 488, 488, 488, 488, 510, 510, 510, 510, 510,
-	},
-	{
-		3, 4, 5, 5, 6, 8, 9, 10, 11, 13, 14, 15, 16, 17, 19, 20,
-		22, 24, 24, 25, 27, 27, 30, 32, 34, 34, 37, 39, 41, 41, 44, 44,
-		47, 47, 50, 53, 53, 56, 56, 60, 60, 60, 64, 64, 68, 68, 72, 72,
-		77, 77, 77, 82, 82, 82, 87, 87, 87, 93, 93, 98, 98, 98, 98, 105,
-		105, 105, 111, 111, 111, 111, 119, 119, 119, 119, 126, 126, 126, 134, 134, 134,
-		134, 143, 143, 143, 143, 152, 152, 152, 152, 152, 162, 162, 162, 162, 162, 172,
-		172, 172, 172, 172, 183, 183, 183, 183, 183, 195, 195, 195, 195, 195, 195, 207,
-		207, 207, 207, 207, 207, 220, 220, 220, 220, 220, 234, 234, 234, 234, 234, 234,
-		234, 249, 249, 249, 249, 249, 249, 249, 265, 265, 265, 265, 265, 265, 265, 282,
-		282, 282, 282, 282, 282, 282, 300, 300, 300, 300, 300, 300, 300, 300, 316, 316,
-		316, 316, 316, 316, 316, 316, 333, 333, 333, 333, 333, 333, 333, 333, 333, 357,
-		357, 357, 357, 357, 357, 357, 357, 357, 380, 380, 380, 380, 380, 380, 380, 380,
-		380, 380, 403, 403, 403, 403, 403, 403, 403, 403, 420, 420, 420, 420, 420, 420,
-		420, 420, 420, 443, 443, 443, 443, 443, 443, 443, 443, 443, 443, 443, 443, 443,
-		443, 443, 443, 443, 465, 465, 465, 465, 465, 465, 465, 488, 488, 488, 488, 488,
-		488, 488, 488, 510, 510, 510, 510, 510, 510, 510, 510, 533, 533, 533, 533, 533,
-
-	},
-	{
-		3, 4, 5, 5, 7, 8, 9, 11, 12, 13, 15, 16, 17, 19, 20, 21,
-		22, 25, 25, 27, 27, 29, 32, 34, 37, 37, 39, 39, 41, 41, 44, 44,
-		50, 50, 53, 53, 53, 60, 60, 64, 64, 64, 68, 68, 72, 72, 72, 72,
-		77, 77, 77, 87, 87, 87, 87, 87, 87, 93, 93, 105, 105, 105, 105, 111,
-		111, 111, 111, 111, 111, 111, 126, 126, 126, 126, 126, 126, 126, 143, 143, 143,
-		143, 143, 143, 143, 143, 162, 162, 162, 162, 162, 162, 162, 162, 162, 162, 172,
-		172, 172, 172, 172, 183, 183, 183, 183, 183, 195, 195, 195, 195, 195, 195, 220,
-		220, 220, 220, 220, 220, 234, 234, 234, 234, 234, 249, 249, 249, 249, 249, 249,
-		249, 265, 265, 265, 265, 265, 265, 265, 282, 282, 282, 282, 282, 282, 282, 282,
-		282, 282, 282, 282, 282, 282, 316, 316, 316, 316, 316, 316, 316, 316, 333, 333,
-		333, 333, 333, 333, 333, 333, 350, 350, 350, 350, 350, 350, 350, 350, 350, 372,
-		372, 372, 372, 372, 372, 372, 372, 372, 395, 395, 395, 395, 395, 395, 395, 395,
-		395, 395, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420, 420,
-		420, 420, 420, 443, 443, 443, 443, 443, 443, 443, 443, 443, 465, 465, 465, 465,
-		465, 465, 465, 465, 488, 488, 488, 488, 488, 488, 488, 510, 510, 510, 510, 510,
-		510, 510, 510, 533, 533, 533, 533, 533, 533, 533, 533, 555, 555, 555, 555, 555,
-	},
-	{
-		3, 4, 6, 6, 7, 8, 10, 11, 12, 14, 15, 17, 17, 19, 21, 22,
-		24, 27, 27, 27, 29, 30, 34, 34, 37, 37, 39, 41, 44, 44, 47, 47,
-		50, 50, 53, 56, 56, 60, 60, 64, 64, 64, 68, 68, 72, 72, 77, 77,
-		82, 82, 82, 87, 87, 87, 93, 93, 93, 98, 98, 105, 105, 105, 105, 111,
-		111, 111, 119, 119, 119, 119, 126, 126, 126, 126, 134, 134, 134, 143, 143, 143,
-		143, 152, 152, 152, 152, 162, 162, 162, 162, 162, 172, 172, 172, 172, 172, 183,
-		183, 183, 183, 183, 195, 195, 195, 195, 195, 207, 207, 207, 207, 207, 207, 220,
-		220, 220, 220, 220, 220, 234, 234, 234, 234, 234, 249, 249, 249, 249, 249, 249,
-		249, 265, 265, 265, 265, 265, 265, 265, 282, 282, 282, 282, 282, 282, 282, 300,
-		300, 300, 300, 300, 300, 300, 316, 316, 316, 316, 316, 316, 316, 316, 350, 350,
-		350, 350, 350, 350, 350, 350, 365, 365, 365, 365, 365, 365, 365, 365, 365, 387,
-		387, 387, 387, 387, 387, 387, 387, 387, 412, 412, 412, 412, 412, 412, 412, 412,
-		412, 412, 420, 420, 420, 420, 420, 420, 420, 420, 443, 443, 443, 443, 443, 443,
-		443, 443, 443, 465, 465, 465, 465, 465, 465, 465, 465, 465, 488, 488, 488, 488,
-		488, 488, 488, 488, 510, 510, 510, 510, 510, 510, 510, 533, 533, 533, 533, 533,
-		533, 533, 533, 555, 555, 555, 555, 555, 555, 555, 555, 578, 578, 578, 578, 578,
-	},
-	{
-		3, 4, 6, 6, 7, 9, 10, 11, 13, 14, 16, 17, 19, 20, 21, 22,
-		24, 27, 27, 29, 30, 32, 34, 37, 39, 39, 41, 44, 47, 47, 50, 50,
-		53, 53, 56, 60, 60, 64, 64, 68, 68, 68, 72, 72, 77, 77, 82, 82,
-		87, 87, 87, 93, 93, 93, 98, 98, 98, 105, 105, 111, 111, 111, 111, 119,
-		119, 119, 126, 126, 126, 126, 134, 134, 134, 134, 143, 143, 143, 152, 152, 152,
-		152, 162, 162, 162, 162, 172, 172, 172, 172, 172, 183, 183, 183, 183, 183, 195,
-		195, 195, 195, 195, 207, 207, 207, 207, 207, 220, 220, 220, 220, 220, 220, 234,
-		234, 234, 234, 234, 234, 249, 249, 249, 249, 249, 265, 265, 265, 265, 265, 265,
-		265, 282, 282, 282, 282, 282, 282, 282, 300, 300, 300, 300, 300, 300, 300, 316,
-		316, 316, 316, 316, 316, 316, 333, 333, 333, 333, 333, 333, 333, 333, 357, 357,
-		357, 357, 357, 357, 357, 357, 380, 380, 380, 380, 380, 380, 380, 380, 380, 403,
-		403, 403, 403, 403, 403, 403, 403, 403, 420, 420, 420, 420, 420, 420, 420, 420,
-		420, 420, 443, 443, 443, 443, 443, 443, 443, 443, 465, 465, 465, 465, 465, 465,
-		465, 465, 465, 488, 488, 488, 488, 488, 488, 488, 488, 488, 510, 510, 510, 510,
-		510, 510, 510, 510, 510, 510, 510, 533, 533, 533, 533, 533, 533, 533, 533, 555,
-		555, 555, 555, 555, 555, 555, 555, 578, 578, 578, 578, 600, 600, 600, 600, 600,
-	},
-};
-
-static int mdss_get_ldu_cd(struct mdss_dsi_ctrl_pdata *ctrl, int ldu_correction_state)
-{
-	int cd;
-	struct samsung_display_driver_data *vdd = check_valid_ctrl(ctrl);
-
-	if (IS_ERR_OR_NULL(vdd)) {
-		LCD_ERR("Invalid data ctrl : 0x%zx vdd : 0x%zx", (size_t)ctrl, (size_t)vdd);
-		return 0;
-	}
-
-	cd = br_tbl_LDU[ldu_correction_state-1][vdd->bl_level];
-
-	if (cd == 443)
-		vdd->auto_brightness = 13;
-	else if (cd == 465)
-		vdd->auto_brightness = 6;
-	else if (cd == 488)
-		vdd->auto_brightness = 7;
-	else if (cd == 510)
-		vdd->auto_brightness = 8;
-	else if (cd == 533)
-		vdd->auto_brightness = 9;
-	else if (cd == 555)
-		vdd->auto_brightness = 10;
-	else if (cd == 578)
-		vdd->auto_brightness = 11;
-	else if (cd == 600)
-		vdd->auto_brightness = 12;
-	else
-		vdd->auto_brightness = 0;
-
-	if (vdd->auto_brightness >= HBM_MODE)
-		vdd->bl_level = 255;
-
-	LCD_ERR("b_level (%d), ldu cd (%d), auto (%d) \n", vdd->bl_level, cd, vdd->auto_brightness);
-
-	return cd;
-}
-
-static void mdss_show_ldu_table(struct samsung_display_driver_data *vdd)
-{
-	int i;
-
-	if (vdd->ldu_correction_state) {
-		pr_err("ldu_correction_state (%d)\n", vdd->ldu_correction_state);
-		for (i=0; i<255; i++) {
-			pr_err("%3d %3d\n",i, br_tbl_LDU[vdd->ldu_correction_state-1][i]);
-		}
-	}
-
-	return;
-}
-
-static unsigned int br_tbl_ccb[256] = {
-	3, 4, 6, 6, 7, 9, 10, 11, 13, 14, 16, 17, 19, 20, 21, 22,
-	24, 27, 27, 29, 30, 32, 34, 37, 39, 39, 41, 44, 47, 47, 50, 50,
-	53, 53, 56, 60, 60, 64, 64, 68, 68, 68, 72, 72, 77, 77, 82, 82,
-	87, 87, 87, 93, 93, 93, 98, 98, 98, 105, 105, 111, 111, 111, 111, 119,
-	119, 119, 126, 126, 126, 126, 134, 134, 134, 134, 143, 143, 143, 152, 152, 152,
-	152, 162, 162, 162, 162, 172, 172, 172, 172, 172, 183, 183, 183, 183, 183, 195,
-	195, 195, 195, 195, 207, 207, 207, 207, 207, 220, 220, 220, 220, 220, 220, 234,
-	234, 234, 234, 234, 234, 249, 249, 249, 249, 249, 265, 265, 265, 265, 265, 265,
-	265, 282, 282, 282, 282, 282, 282, 282, 300, 300, 300, 300, 300, 300, 300, 316,
-	316, 316, 316, 316, 316, 316, 333, 333, 333, 333, 333, 333, 333, 333, 357, 357,
-	357, 357, 357, 357, 357, 357, 380, 380, 380, 380, 380, 380, 380, 380, 380, 403,
-	403, 403, 403, 403, 403, 403, 403, 403, 420, 420, 420, 420, 420, 420, 420, 420,
-	420, 420, 443, 443, 443, 443, 443, 443, 443, 443, 465, 465, 465, 465, 465, 465,
-	465, 465, 465, 488, 488, 488, 488, 488, 488, 488, 488, 488, 510, 510, 510, 510,
-	510, 510, 510, 510, 510, 510, 510, 533, 533, 533, 533, 533, 533, 533, 533, 555,
-	555, 555, 555, 555, 555, 555, 555, 578, 578, 578, 578, 600, 600, 600, 600, 600,
-};
-
-static int mdss_get_ccb_idx(struct mdss_dsi_ctrl_pdata *ctrl, int cd)
-{
-	int i;
-
-	for (i=255; i>=0; i--) {
-		if (cd >= br_tbl_ccb[i])
-			break;
-	}
-
-	LCD_ERR("cd (%d) ccb_idx (%d)(%dcd)\n", cd, i,br_tbl_ccb[i]);
-
-	return i;
-}
-
-static int mdss_get_ccb_cd(struct mdss_dsi_ctrl_pdata *ctrl)
-{
-	struct samsung_display_driver_data *vdd = check_valid_ctrl(ctrl);
-
-	if (IS_ERR_OR_NULL(vdd)) {
-		LCD_ERR("Invalid data ctrl : 0x%zx vdd : 0x%zx", (size_t)ctrl, (size_t)vdd);
-		return 0;
-	}
-
-	vdd->ccb_cd = br_tbl_ccb[vdd->bl_level];
-
-	if (vdd->ccb_cd == 443)
-		vdd->auto_brightness = 13;
-	else if (vdd->ccb_cd == 465)
-		vdd->auto_brightness = 6;
-	else if (vdd->ccb_cd == 488)
-		vdd->auto_brightness = 7;
-	else if (vdd->ccb_cd == 510)
-		vdd->auto_brightness = 8;
-	else if (vdd->ccb_cd == 533)
-		vdd->auto_brightness = 9;
-	else if (vdd->ccb_cd == 555)
-		vdd->auto_brightness = 10;
-	else if (vdd->ccb_cd == 578)
-		vdd->auto_brightness = 11;
-	else if (vdd->ccb_cd == 600)
-		vdd->auto_brightness = 12;
-	else
-		vdd->auto_brightness = 0;
-
-	if (vdd->auto_brightness >= HBM_MODE)
-		vdd->bl_level = 255;
-
-	LCD_ERR("b_level (%d), ccb_cd (%d), auto (%d) \n", vdd->bl_level, vdd->ccb_cd, vdd->auto_brightness);
-
-	return vdd->ccb_cd;
-}
-
 static void mdss_send_colorweakness_ccb_cmd(struct samsung_display_driver_data *vdd, int mode)
 {
 	LCD_INFO("mode (%d) color_weakness_value (%x) \n", mode, vdd->color_weakness_value);
@@ -3235,6 +2982,28 @@ static void mdss_send_colorweakness_ccb_cmd(struct samsung_display_driver_data *
 		mdss_samsung_send_cmd(vdd->ctrl_dsi[DISPLAY_1], PANEL_COLOR_WEAKNESS_ENABLE);
 	} else
 		mdss_samsung_send_cmd(vdd->ctrl_dsi[DISPLAY_1], PANEL_COLOR_WEAKNESS_DISABLE);
+}
+
+static void mdss_panel_multires(struct samsung_display_driver_data *vdd)
+{
+	if(vdd->multires_stat.prev_mode != vdd->multires_stat.curr_mode)
+	{
+		LCD_INFO("vdd->multires_stat.prev_mode = %d, vdd-multires_stat.curr_mode = %d\n",
+			vdd->multires_stat.prev_mode, vdd->multires_stat.curr_mode);
+
+		if(vdd->multires_stat.curr_mode == MULTIRES_FHD)
+			mdss_samsung_send_cmd(vdd->ctrl_dsi[DISPLAY_1], PANEL_MULTIRES_FHD);
+		else if(vdd->multires_stat.curr_mode == MULTIRES_HD)
+			mdss_samsung_send_cmd(vdd->ctrl_dsi[DISPLAY_1], PANEL_MULTIRES_HD);
+		else if(vdd->multires_stat.curr_mode == MULTIRES_WQHD)
+		{
+			if(vdd->multires_stat.prev_mode == MULTIRES_FHD)
+				mdss_samsung_send_cmd(vdd->ctrl_dsi[DISPLAY_1], PANEL_MULTIRES_FHD_TO_WQHD);
+			else
+				mdss_samsung_send_cmd(vdd->ctrl_dsi[DISPLAY_1], PANEL_MULTIRES_HD_TO_WQHD);
+		}
+		vdd->multires_stat.prev_mode = vdd->multires_stat.curr_mode;
+	}
 }
 
 static void dsi_update_mdnie_data(void)
@@ -3324,11 +3093,18 @@ static void dsi_update_mdnie_data(void)
 	mdnie_data.DSI0_GRAYSCALE_MDNIE = DSI0_GRAYSCALE_MDNIE;
 	mdnie_data.DSI0_GRAYSCALE_NEGATIVE_MDNIE= DSI0_GRAYSCALE_NEGATIVE_MDNIE;
 	mdnie_data.DSI0_CURTAIN = DSI0_SCREEN_CURTAIN_MDNIE;
+	mdnie_data.DSI0_NIGHT_MODE_MDNIE = DSI0_NIGHT_MODE_MDNIE;
+	mdnie_data.DSI0_NIGHT_MODE_MDNIE_1 = DSI0_NIGHT_MODE_MDNIE_1;
+	mdnie_data.DSI0_COLOR_BLIND_MDNIE_SCR = DSI0_COLOR_BLIND_MDNIE_1;
+	mdnie_data.DSI0_RGB_SENSOR_MDNIE_SCR = DSI0_RGB_SENSOR_MDNIE_1;
 
 	mdnie_data.mdnie_tune_value_dsi0 = mdnie_tune_value_dsi0;
 	mdnie_data.mdnie_tune_value_dsi1 = mdnie_tune_value_dsi0;
 	mdnie_data.hmt_color_temperature_tune_value_dsi0 = hmt_color_temperature_tune_value_dsi0;
 	mdnie_data.hmt_color_temperature_tune_value_dsi1 = hmt_color_temperature_tune_value_dsi0;
+
+	mdnie_data.hdr_tune_value_dsi0 = hdr_tune_value_dsi0;
+	mdnie_data.hdr_tune_value_dsi1 = hdr_tune_value_dsi0;
 
 	/* Update MDNIE data related with size, offset or index */
 	mdnie_data.dsi0_bypass_mdnie_size = ARRAY_SIZE(DSI0_BYPASS_MDNIE);
@@ -3349,6 +3125,12 @@ static void dsi_update_mdnie_data(void)
 	mdnie_data.dsi1_adjust_ldu_table = adjust_ldu_data;
 	mdnie_data.dsi0_max_adjust_ldu = 6;
 	mdnie_data.dsi1_max_adjust_ldu = 6;
+	mdnie_data.dsi0_night_mode_table = night_mode_data;
+	mdnie_data.dsi1_night_mode_table = night_mode_data;
+	mdnie_data.dsi0_max_night_mode_index = 11;
+	mdnie_data.dsi1_max_night_mode_index = 11;
+	mdnie_data.dsi0_scr_step_index = MDNIE_STEP1_INDEX;
+	mdnie_data.dsi1_scr_step_index = MDNIE_STEP1_INDEX;
 }
 
 static void  mdss_panel_init(struct samsung_display_driver_data *vdd)
@@ -3416,8 +3198,6 @@ static void  mdss_panel_init(struct samsung_display_driver_data *vdd)
 	vdd->panel_func.samsung_smart_dimming_hmt_init = mdss_samart_dimming_init_hmt;
 	vdd->panel_func.samsung_smart_get_conf_hmt = smart_get_conf_S6E3HF4_AMB526JS01_hmt;
 
-	/* force ACL */
-	vdd->panel_func.samsung_force_acl_on = mdss_force_acl_on;
 	dsi_update_mdnie_data();
 
 	/* Panel LPM */
@@ -3428,8 +3208,8 @@ static void  mdss_panel_init(struct samsung_display_driver_data *vdd)
 	vdd->panel_func.set_panel_fab_type = mdss_set_hero2_fab_type;
 	vdd->panel_func.get_panel_fab_type = mdss_get_hero2_fab_type;
 
-	/* send 2c short pck before sending image date to reset DE (only for HA3/HF4 ddi) */
-	vdd->send_2c_cmd = false;
+	/* send recovery pck before sending image date (for ESD recovery) */
+	vdd->send_esd_recovery = false;
 
 	vdd->auto_brightness_level = 12;
 
@@ -3438,20 +3218,19 @@ static void  mdss_panel_init(struct samsung_display_driver_data *vdd)
 
 	/* Set IRC init value */
 	vdd->irc_info.irc_enable_status = true;
-	vdd->irc_info.irc_mode= IRC_MODERATO_MODE;
-
-	/* set gradual acl */
-	vdd->panel_func.samsung_set_gradual_acl_status = mdss_set_gradual_acl_status;
-	vdd->gradual_pre_acl_on = 1;
-
-	/* LDU corrention */
-	vdd->panel_func.get_ldu_cd = mdss_get_ldu_cd;
-	vdd->panel_func.show_ldu_table = mdss_show_ldu_table;
+	vdd->irc_info.irc_mode = IRC_MODERATO_MODE;
 
 	/* COLOR WEAKNESS */
-	vdd->panel_func.get_ccb_cd = mdss_get_ccb_cd;
-	vdd->panel_func.get_ccb_idx = mdss_get_ccb_idx;
-	vdd->panel_func.color_weakness_ccb_on_off =  mdss_send_colorweakness_ccb_cmd;
+	vdd->panel_func.color_weakness_ccb_on_off = mdss_send_colorweakness_ccb_cmd;
+
+	/* Support DDI HW CURSOR */
+	vdd->panel_func.ddi_hw_cursor = ddi_hw_cursor;
+
+	/* MULTI_RESOLUTION */
+	vdd->panel_func.samsung_multires = mdss_panel_multires;
+
+	/* ACL default ON */
+	vdd->acl_status = 1;
 
 	mdss_init_hero2_fab_type(vdd);
 }

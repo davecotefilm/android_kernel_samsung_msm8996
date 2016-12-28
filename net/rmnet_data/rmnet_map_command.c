@@ -93,16 +93,19 @@ static uint8_t rmnet_map_do_flow_control(struct sk_buff *skb,
 	LOGD("dev:%s, qos_id:0x%08X, ip_family:%hd, fc_seq %hd, en:%d",
 	     skb->dev->name, qos_id, ip_family & 3, fc_seq, enable);
 
-	if (r)
+	if (r) {
+		rmnet_kfree_skb(skb, RMNET_STATS_SKBFREE_MAPC_UNSUPPORTED);
 		return RMNET_MAP_COMMAND_UNSUPPORTED;
-	else
+	} else {
 		return RMNET_MAP_COMMAND_ACK;
+	}
 }
 
 /**
  * rmnet_map_send_ack() - Send N/ACK message for MAP commands
  * @skb: Socket buffer containing the MAP command message
  * @type: N/ACK message selector
+ * @config: Physical end-point configuration of ingress device
  *
  * skb is modified to contain the message type selector. The message is then
  * transmitted on skb->dev. Note that this function grabs global Tx lock on
@@ -112,21 +115,40 @@ static uint8_t rmnet_map_do_flow_control(struct sk_buff *skb,
  *      - void
  */
 static void rmnet_map_send_ack(struct sk_buff *skb,
-			       unsigned char type)
+			       unsigned char type,
+			       struct rmnet_phys_ep_conf_s *config)
 {
 	struct rmnet_map_control_command_s *cmd;
 	int xmit_status;
+	struct net_device *dev;
 
-	if (unlikely(!skb))
+	if (unlikely(!skb) || unlikely(!skb->dev))
 		BUG();
 
+	dev = skb->dev;
+
 	skb->protocol = htons(ETH_P_MAP);
+
+	if ((config->ingress_data_format & RMNET_INGRESS_FORMAT_MAP_CKSUMV3) ||
+	    (config->ingress_data_format & RMNET_INGRESS_FORMAT_MAP_CKSUMV4)) {
+		if (unlikely(skb->len < (sizeof(struct rmnet_map_header_s) +
+		    + RMNET_MAP_GET_LENGTH(skb)
+		    + sizeof(struct rmnet_map_dl_checksum_trailer_s)))) {
+			rmnet_stats_dl_checksum(
+			  RMNET_MAP_CHECKSUM_ERR_BAD_BUFFER);
+			return;
+		}
+
+		skb_trim(skb, skb->len -
+			 sizeof(struct rmnet_map_dl_checksum_trailer_s));
+	}
+
 	cmd = RMNET_MAP_GET_CMD_START(skb);
 	cmd->cmd_type = type & 0x03;
 
-	netif_tx_lock(skb->dev);
-	xmit_status = skb->dev->netdev_ops->ndo_start_xmit(skb, skb->dev);
-	netif_tx_unlock(skb->dev);
+	netif_tx_lock(dev);
+	xmit_status = dev->netdev_ops->ndo_start_xmit(skb, dev);
+	netif_tx_unlock(dev);
 
 	LOGD("MAP command ACK=%hhu sent with rc: %d", type & 0x03, xmit_status);
 }
@@ -171,8 +193,10 @@ rx_handler_result_t rmnet_map_command(struct sk_buff *skb,
 		rmnet_map_command_stats[RMNET_MAP_COMMAND_UNKNOWN]++;
 		LOGM("Uknown MAP command: %d", command_name);
 		rc = RMNET_MAP_COMMAND_UNSUPPORTED;
+		rmnet_kfree_skb(skb, RMNET_STATS_SKBFREE_MAPC_UNSUPPORTED);
 		break;
 	}
-	rmnet_map_send_ack(skb, rc);
+	if (rc == RMNET_MAP_COMMAND_ACK)
+		rmnet_map_send_ack(skb, rc, config);
 	return RX_HANDLER_CONSUMED;
 }

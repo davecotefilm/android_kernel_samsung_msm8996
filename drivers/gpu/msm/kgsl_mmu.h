@@ -153,6 +153,7 @@ int kgsl_mmu_unmap(struct kgsl_pagetable *pagetable,
 int kgsl_mmu_put_gpuaddr(struct kgsl_pagetable *pagetable,
 		 struct kgsl_memdesc *memdesc);
 unsigned int kgsl_virtaddr_to_physaddr(void *virtaddr);
+int kgsl_mmu_get_ptname_from_ptbase(struct kgsl_mmu *mmu, u64 pt_base);
 unsigned int kgsl_mmu_log_fault_addr(struct kgsl_mmu *mmu,
 			phys_addr_t pt_base, unsigned int addr);
 int kgsl_mmu_enabled(void);

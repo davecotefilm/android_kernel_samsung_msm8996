@@ -53,7 +53,7 @@ extern void muic_send_dock_intent(int type);
  * status: normal if 1, abnormal if 0
  * return 0 on success, -1 on fail
  */
-static int muic_noti_gamepad_status(int status, const char *sender)
+static int muic_noti_usbconnection_status(int status, const char *sender)
 {
 	uint val;
 
@@ -62,12 +62,12 @@ static int muic_noti_gamepad_status(int status, const char *sender)
 		return -1;
 	}
 
-	pr_info("%s:%s gamepas_status=[%s] from %s\n", MUIC_DEV_NAME, __func__,
+	pr_info("%s:%s usbconnection_status=[%s] from %s\n", MUIC_DEV_NAME, __func__,
 		status ? "normal" : "abnormal", sender);
 
 	val = status ? COA_STATUS_OK: COA_STATUS_NOK;
 	val <<= COAGENT_PARAM_BITS;
-	val |= COA_GAMEPAD_STATUS;
+	val |= COA_USB_STATUS;
 	coagent_in(&val);
 
 	return 0;
@@ -78,6 +78,7 @@ static int muic_handle_usb_notification(struct notifier_block *nb,
 {
 	muic_data_t *pmuic =
 		container_of(nb, muic_data_t, usb_nb);
+	int devicetype = *(int *)data;
 
 	switch (action) {
 	/* Abnormal device */
@@ -88,25 +89,29 @@ static int muic_handle_usb_notification(struct notifier_block *nb,
 		else if ((pmuic->attached_dev == ATTACHED_DEV_GAMEPAD_MUIC) ||
 			(pmuic->attached_dev == ATTACHED_DEV_OTG_MUIC))
 			pr_info("%s: Abnormal Gamepad -> do nothing.\n", __func__);
-		
+		else if(pmuic->attached_dev != ATTACHED_DEV_USB_LANHUB_MUIC)
+			pr_info("%s: Abnormal Lanhub -> do nothing.\n", __func__);	
 		break;
 
-	/* Gamepad device connected */
+	/* device connected */
 	case EXTERNAL_NOTIFY_DEVICE_CONNECT:
-		pr_info("%s: DEVICE_CONNECT(Gamepad)\n", __func__);
+		pr_info("%s: DEVICE_CONNECT(%d)\n", __func__, devicetype);
 
 
 		if ((pmuic->attached_dev != ATTACHED_DEV_GAMEPAD_MUIC) &&
-			(pmuic->attached_dev != ATTACHED_DEV_OTG_MUIC)) {
+			(pmuic->attached_dev != ATTACHED_DEV_OTG_MUIC) &&
+			(pmuic->attached_dev != ATTACHED_DEV_USB_LANHUB_MUIC)) {
 			pr_info("%s: Unexpected scenario.n", __func__);
 			break;
-		}			
+		}
 
-		pmuic->is_gamepad = true;
-		if (pmuic->attached_dev == ATTACHED_DEV_OTG_MUIC)
-			muic_send_dock_intent(MUIC_DOCK_GAMEPAD_WITH_EARJACK);
-
-		muic_noti_gamepad_status(1, "USB");
+		if(devicetype == COA_DEVICE_GAMEPAD)
+		{
+			pmuic->is_gamepad = true;
+			if (pmuic->attached_dev == ATTACHED_DEV_OTG_MUIC)
+				muic_send_dock_intent(MUIC_DOCK_GAMEPAD_WITH_EARJACK);
+		}
+		muic_noti_usbconnection_status(1, "USB");
 		break;
 
 	default:

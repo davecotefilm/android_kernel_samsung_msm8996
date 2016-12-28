@@ -203,10 +203,6 @@ static int p61_set_clk(struct p61_dev *p61_device)
 	/* CS enable : kernel should not control spi pins for TZ Qcom */
 	/* gpio_set_value(p61_device->cspin, 0);*/
 	usleep_range(50, 70);
-	if (!wake_lock_active(&p61_device->ese_lock)) {
-		pr_info("%s: [NFC-ESE] wake lock.\n", __func__);
-		wake_lock(&p61_device->ese_lock);
-	}
 	return ret_val;
 }
 
@@ -239,10 +235,6 @@ static int p61_disable_clk(struct p61_dev *p61_device)
 
 	/* CS enable : kernel should not control spi pins for TZ Qcom */
 	/* gpio_set_value(p61_device->cspin, 1);*/
-	if (wake_lock_active(&p61_device->ese_lock)) {
-		pr_info("%s: [NFC-ESE] wake unlock.\n", __func__);
-		wake_unlock(&p61_device->ese_lock);
-	}
 	return ret_val;
 }
 
@@ -360,12 +352,17 @@ static int p61_dev_open(struct inode *inode, struct file *filp)
 
 	filp->private_data = p61_dev;
 	if (p61_dev->device_opened) {
-		P61_ERR_MSG("%s - ALREADY opened!\n", __func__);
+		pr_info("%s - ALREADY opened!\n", __func__);
 		return -EBUSY;
 	}
 	p61_dev->device_opened = true;
-	P61_DBG_MSG("%s : Major No: %d, Minor No: %d\n", __func__,
+	pr_info("%s: Major No: %d, Minor No: %d\n", __func__,
 			imajor(inode), iminor(inode));
+
+	if (!wake_lock_active(&p61_dev->ese_lock)) {
+		pr_info("%s: [NFC-ESE] wake lock.\n", __func__);
+		wake_lock(&p61_dev->ese_lock);
+	}
 
 	return 0;
 }
@@ -473,22 +470,23 @@ static long p61_dev_ioctl(struct file *filp, unsigned int cmd,
 		break;
 
 	case P61_SET_SPM_PWR:
-		pr_info(KERN_ALERT " P61_SET_SPM_PWR: enter");
+		pr_info(KERN_ALERT " P61_SET_SPM_PWR: enter, arg(%lu)\n", arg);
 		ret = pn547_dev_ioctl(filp, P61_SET_SPI_PWR, arg);
-		pwr_req_on = arg;
-		pr_info(KERN_ALERT " P61_SET_SPM_PWR: exit");
+		if(arg == 0 || arg == 1 || arg == 3)
+			pwr_req_on = arg;
+		pr_info(KERN_ALERT " P61_SET_SPM_PWR: exit\n");
 		break;
 
 	case P61_GET_SPM_STATUS:
-		pr_info(KERN_ALERT " P61_GET_SPM_STATUS: enter");
+		pr_info(KERN_ALERT " P61_GET_SPM_STATUS: enter\n");
 		ret = pn547_dev_ioctl(filp, P61_GET_PWR_STATUS, arg);
-		pr_info(KERN_ALERT " P61_GET_SPM_STATUS: exit");
+		pr_info(KERN_ALERT " P61_GET_SPM_STATUS: exit\n");
 		break;
 
 	case P61_GET_ESE_ACCESS:
-		P61_DBG_MSG(KERN_ALERT " P61_GET_ESE_ACCESS: enter");
+		P61_DBG_MSG(KERN_ALERT " P61_GET_ESE_ACCESS: enter\n");
 		ret = pn547_dev_ioctl(filp, P547_GET_ESE_ACCESS, arg);
-		P61_DBG_MSG(KERN_ALERT " P61_GET_ESE_ACCESS ret: %d exit",ret);
+		P61_DBG_MSG(KERN_ALERT " P61_GET_ESE_ACCESS ret: %d exit\n",ret);
 		break;
 
 	default:
@@ -517,9 +515,11 @@ static int p61_dev_release(struct inode *inode, struct file *file)
 		wake_unlock(&p61_dev->ese_lock);
 	}
 
-	if (pwr_req_on != 0) {
+	if (pwr_req_on && (pwr_req_on != 5)) {
 		pr_info("%s: [NFC-ESE] release spi session.\n", __func__);
+		pwr_req_on = 0;
 		pn547_dev_ioctl(file, P61_SET_SPI_PWR, 0);
+		pn547_dev_ioctl(file, P61_SET_SPI_PWR, 5);		
 	}
 	p61_dev->device_opened = false;
 	return 0;

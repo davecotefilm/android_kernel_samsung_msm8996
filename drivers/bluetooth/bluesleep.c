@@ -961,12 +961,14 @@ static int bluesleep_probe(struct platform_device *pdev)
 		goto free_bsi;
 	}
 
-	bsi->host_wake_irq = gpio_to_irq(bsi->host_wake);
-	if (bsi->host_wake_irq < 0) {
+	ret = gpio_to_irq(bsi->host_wake);
+
+	if (ret < 0) {
 		BT_ERR("couldn't find host_wake irq");
 		ret = -ENODEV;
 		goto free_bt_host_wake;
 	} else {
+		bsi->host_wake_irq = ret;
 		BT_ERR("[BT] hostwake irq is %d", bsi->host_wake_irq);
 	}
 	bsi->irq_polarity = POLARITY_HIGH;/*anything else*/

@@ -6,6 +6,10 @@
 #include <linux/of.h>
 #include <linux/cpufreq.h>
 
+#ifdef CONFIG_DEBUG_BUS_VOTER
+#include <linux/msm-bus.h>
+#endif
+
 #ifdef CONFIG_SCHED_HMP
 #define USE_HMP_BOOST
 #endif
@@ -141,31 +145,32 @@ int set_freq_limit(unsigned long id, unsigned int freq)
 }
 #endif
 
-#ifdef CONFIG_DEBUG_BUS_VOTER
+/*#ifdef CONFIG_DEBUG_BUS_VOTER
 #define SET_BOOSTER  { \
 	pr_debug("[Input Booster2] %s      set_freq_limit : %d, msm_bus_floor_vote : %d\n", glGage, _this->param[_this->index].cpu_freq, _this->param[_this->index].bimc_freq); \
 	set_hmp(_this->param[_this->index].hmp_boost); \
-	set_freq_limit(DVFS_TOUCH_ID, _this->param[_this->index].cpu_freq);  \
+	set_freq_limit((_this->change_on_release) ? DVFS_MULTI_TOUCH_ID : DVFS_TOUCH_ID, _this->param[_this->index].cpu_freq);  \
 	msm_bus_floor_vote("bimc", _this->param[_this->index].bimc_freq * 1000);  \
 }
 #define REMOVE_BOOSTER  { \
 	pr_debug("[Input Booster2] %s      set_freq_limit : %d, msm_bus_floor_vote : %d\n", glGage, -1, 0); \
 	set_hmp(0); \
-	set_freq_limit(DVFS_TOUCH_ID, -1);  \
+	set_freq_limit((_this->change_on_release) ? DVFS_MULTI_TOUCH_ID : DVFS_TOUCH_ID, -1);  \
 	msm_bus_floor_vote("bimc", 0);  \
 }
 #else
+*/
 #define SET_BOOSTER  { \
 	pr_debug("[Input Booster2] %s      set_freq_limit : %d\n", glGage, _this->param[_this->index].cpu_freq); \
 	set_hmp(_this->param[_this->index].hmp_boost); \
-	set_freq_limit(DVFS_TOUCH_ID, _this->param[_this->index].cpu_freq);  \
+	set_freq_limit((_this->change_on_release) ? DVFS_MULTI_TOUCH_ID : DVFS_TOUCH_ID, _this->param[_this->index].cpu_freq);  \
 }
 #define REMOVE_BOOSTER  { \
 	pr_debug("[Input Booster2] %s      set_freq_limit : %d\n", glGage, -1); \
 	set_hmp(0); \
-	set_freq_limit(DVFS_TOUCH_ID, -1);  \
+	set_freq_limit((_this->change_on_release) ? DVFS_MULTI_TOUCH_ID : DVFS_TOUCH_ID, -1);  \
 }
-#endif
+//#endif
 #define PROPERTY_BOOSTER(_device_param_, _dt_param_, _time_)  { \
 	_device_param_.cpu_freq = _dt_param_.cpu_freq; \
 	_device_param_.bimc_freq = _dt_param_.bimc_freq; \

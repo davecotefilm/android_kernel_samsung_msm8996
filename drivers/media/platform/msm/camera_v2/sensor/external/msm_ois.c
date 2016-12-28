@@ -24,7 +24,7 @@
 #include "msm_camera_io_util.h"
 #include "msm_camera_dt_util.h"
 
-//#define CONFIG_MSM_CAMERA_DEBUG
+//#define MSM_OIS_DEBUG
 
 DEFINE_MSM_MUTEX(msm_ois_mutex);
 
@@ -49,7 +49,7 @@ static struct v4l2_file_operations msm_ois_v4l2_subdev_fops;
 #define MAX_RETRY_COUNT               (3)
 
 #undef CDBG
-#ifdef CONFIG_MSM_CAMERA_DEBUG
+#ifdef MSM_OIS_DEBUG
 #define CDBG(fmt, args...) pr_err(fmt, ##args)
 #else
 #define CDBG(fmt, args...) do { } while (0)
@@ -139,7 +139,7 @@ static int msm_ois_get_fw_status(struct msm_ois_ctrl_t *a_ctrl)
 
 static int msm_ois_set_shift(struct msm_ois_ctrl_t *a_ctrl)
 {
-    int rc = 0, retries = 5;
+    int rc = 0, retries = 20;
     uint16_t status = 0;
     uint16_t servoVal = 0;
     unsigned char SendData[4];
@@ -163,7 +163,7 @@ static int msm_ois_set_shift(struct msm_ois_ctrl_t *a_ctrl)
             pr_err("%s : read register fail!. status: 0x%x\n", __func__, status);
             goto ERROR;
         }
-        msleep(30);
+        usleep_range(10000, 11000);
     } while (status != 0x01);
 
     SendData[0] = 0x85;
@@ -178,6 +178,7 @@ static int msm_ois_set_shift(struct msm_ois_ctrl_t *a_ctrl)
         goto ERROR;
     }
 
+    a_ctrl->is_shift_enabled = true;
 ERROR:
     if (servoVal == 0x01) {
         rc = msm_ois_i2c_byte_write(a_ctrl, 0x0000, 0x01);   // OIS servo on
@@ -264,10 +265,20 @@ static int32_t msm_ois_read_phone_ver(struct msm_ois_ctrl_t *a_ctrl)
     sprintf(ois_hwinfo, "%c%c%c", a_ctrl->module_ver.gyro_sensor, a_ctrl->module_ver.driver_ic, a_ctrl->module_ver.core_ver);
 #endif
 
-    if (ois_core_ver == 'A' || ois_core_ver == 'C')
-        sprintf(ois_bin_full_path, "%s/%s", OIS_FW_PATH, OIS_FW_DOM_NAME);
-    else if (ois_core_ver == 'B' || ois_core_ver == 'D')
-        sprintf(ois_bin_full_path, "%s/%s", OIS_FW_PATH, OIS_FW_SEC_NAME);
+    switch (ois_core_ver) {
+        case 'A':
+        case 'C':
+        case 'M':
+        case 'O':
+            sprintf(ois_bin_full_path, "%s/%s", OIS_FW_PATH, OIS_FW_DOM_NAME);
+            break;
+        case 'B':
+        case 'D':
+        case 'N':
+        case 'P':
+            sprintf(ois_bin_full_path, "%s/%s", OIS_FW_PATH, OIS_FW_SEC_NAME);
+            break;
+    }
     sprintf(a_ctrl->load_fw_name, ois_bin_full_path); // to use in fw_update
 
     pr_info("OIS FW : %s", ois_bin_full_path);
@@ -400,7 +411,6 @@ static int32_t msm_ois_set_mode(struct msm_ois_ctrl_t *a_ctrl,
     if (!a_ctrl->is_shift_enabled) {
         CDBG_I("SET :: SHIFT_CALIBRATION\n");
         msm_ois_set_shift(a_ctrl);
-        a_ctrl->is_shift_enabled = true;
     }
 
     switch(mode) {
@@ -428,7 +438,11 @@ static int32_t msm_ois_set_mode(struct msm_ois_ctrl_t *a_ctrl,
 
         case OIS_MODE_SINE_X:
             CDBG_I("SET :: OIS_MODE_SINE_X\n"); // for factory test
-            msleep(30);
+            msleep(100);
+            if (!a_ctrl->is_shift_enabled) {
+                CDBG_I("SET :: SHIFT_CALIBRATION\n");
+                msm_ois_set_shift(a_ctrl);
+            }
             msm_ois_i2c_byte_write(a_ctrl, 0x18, 0x01); /* OIS SIN_CTRL- X */
             msm_ois_i2c_byte_write(a_ctrl, 0x19, 0x01); /* OIS SIN_FREQ - 1 hz*/
             msm_ois_i2c_byte_write(a_ctrl, 0x1A, 0x2d); /* OIS SIN_AMP - 40 */
@@ -438,7 +452,11 @@ static int32_t msm_ois_set_mode(struct msm_ois_ctrl_t *a_ctrl,
 
         case OIS_MODE_SINE_Y:
             CDBG_I("SET :: OIS_MODE_SINE_Y\n"); // for factory test
-            msleep(30);
+            msleep(100);
+            if (!a_ctrl->is_shift_enabled) {
+                CDBG_I("SET :: SHIFT_CALIBRATION\n");
+                msm_ois_set_shift(a_ctrl);
+            }
             msm_ois_i2c_byte_write(a_ctrl, 0x18, 0x02); /* OIS SIN_CTRL- Y */
             msm_ois_i2c_byte_write(a_ctrl, 0x19, 0x01); /* OIS SIN_FREQ - 1 hz*/
             msm_ois_i2c_byte_write(a_ctrl, 0x1A, 0x2d); /* OIS SIN_AMP - 40 */
@@ -599,9 +617,9 @@ static int32_t msm_ois_read_user_data_section(struct msm_ois_ctrl_t *a_ctrl, uin
     }
     if (i < 0)
         goto ERROR;
-    
+
     /* OIS Shift Info Read */
-    /* OIS Shift Calibration Read */    
+    /* OIS Shift Calibration Read */
     rc = msm_ois_i2c_seq_read(a_ctrl, 0x0100, shift_data, 56);
     if (rc < 0)
         goto ERROR;
@@ -673,7 +691,7 @@ int msm_ois_shift_calibration(uint16_t af_position) {
     }
 
     data[0] = (g_msm_ois_t->shift_tbl.ois_shift_x[af_position] & 0x00FF);
-    data[1] = ((g_msm_ois_t->shift_tbl.ois_shift_x[af_position] >> 8) & 0x00FF);    
+    data[1] = ((g_msm_ois_t->shift_tbl.ois_shift_x[af_position] >> 8) & 0x00FF);
     data[2] = (g_msm_ois_t->shift_tbl.ois_shift_y[af_position] & 0x00FF);
     data[3] = ((g_msm_ois_t->shift_tbl.ois_shift_y[af_position] >> 8) & 0x00FF);
 
@@ -1355,7 +1373,7 @@ static int msm_ois_close(struct v4l2_subdev *sd,
         pr_err("failed\n");
         return -EINVAL;
     }
-		
+
 #if defined(CONFIG_SENSOR_RETENTION)
     if (sensor_retention_mode) {
 	    CDBG_I("now sensor retention mode\n");
@@ -1415,7 +1433,7 @@ static long msm_ois_subdev_ioctl(struct v4l2_subdev *sd,
     struct msm_ois_ctrl_t *a_ctrl = v4l2_get_subdevdata(sd);
     void __user *argp = (void __user *)arg;
     CDBG_I("Enter\n");
-    CDBG_I("%s:%d a_ctrl %p argp %p\n", __func__, __LINE__, a_ctrl, argp);
+
     switch (cmd) {
     case VIDIOC_MSM_SENSOR_GET_SUBDEV_ID:
         return msm_ois_get_subdev_id(a_ctrl, argp);
@@ -2486,7 +2504,7 @@ static ssize_t ois_autotest_show(struct device *dev,
         }
     }
 
-    cnt = sprintf(buf, "%s, %d, %s, %d", (x_result ? "pass" : "fail"), (x_result ? 0 : sin_x), (y_result ? "pass" : "fail"), (y_result ? 0 : sin_y));    
+    cnt = sprintf(buf, "%s, %d, %s, %d", (x_result ? "pass" : "fail"), (x_result ? 0 : sin_x), (y_result ? "pass" : "fail"), (y_result ? 0 : sin_y));
     pr_info("result : %s\n", buf);
     return cnt;
 }

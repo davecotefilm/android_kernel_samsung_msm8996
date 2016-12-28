@@ -56,17 +56,17 @@ struct task_struct;
 
 #ifdef CONFIG_RKP_CFP_ROPP
 void rkp_cfp_ropp_change_keys(struct task_struct *p);
-void reencrypt_task_return_addresses(struct task_struct * tsk, unsigned long);
-void reencrypt_return_addresses(unsigned long);
 #endif // CONFIG_RKP_CFP_ROPP
 
 #ifdef CONFIG_RKP_CFP_FIX_SMC_BUG
 #define PRE_SMC_INLINE \
-	"stp " STR(RRX) ", " STR(RRS) ", [sp, #-16]!\n" \
+	"stp	" STR(RRX) ", " STR(RRS) ", [sp, #-16]!\n" \
+	"dsb	sy\n" \
+	"isb\n" \
 
 #ifdef CONFIG_RKP_CFP_ROPP_HYPKEY
 #define POST_SMC_INLINE \
-	"dsb    sy\n" \
+	"dsb	sy\n" \
 	"isb\n" \
 	/* "get_thread_info " STR(RRK) "\n" */ \
 	"mov	" STR(RRX) ", sp\n" \
@@ -80,19 +80,17 @@ void reencrypt_return_addresses(unsigned long);
 	"hvc	#0\n" \
 	"ldp	x0, x1, [sp], #16\n" \
 	/*load RRX and RRS*/ \
-	"ldp " STR(RRX) ", " STR(RRS) ", [sp], #16\n"
-
+	"ldp	" STR(RRX) ", " STR(RRS) ", [sp], #16\n"
 #else //CONFIG_RKP_CFP_ROPP_HYPKEY
-
 #define POST_SMC_INLINE \
-	"dsb    sy\n" \
+	"dsb	sy\n" \
 	"isb\n" \
 	/* "get_thread_info " STR(RRK) "\n" */ \
 	"mov	" STR(RRX) ", sp\n" \
 	"and	" STR(RRX) ", " STR(RRX) ", #" STR(~(THREAD_SIZE - 1)) "	// top of stack\n" \
 	/* "load_key " STR(RRK) "\n" */ \
-	"ldr " STR(RRK) ", [" STR(RRX) " , #" STR(TI_RRK_AGAIN) " ]\n" \
-	"ldp " STR(RRX) ", " STR(RRS) ", [sp], #16\n"
+	"ldr	" STR(RRK) ", [" STR(RRX) " , #" STR(TI_RRK_AGAIN) " ]\n" \
+	"ldp	" STR(RRX) ", " STR(RRS) ", [sp], #16\n"
 
 #endif //CONFIG_RKP_CFP_ROPP_HYPKEY
 

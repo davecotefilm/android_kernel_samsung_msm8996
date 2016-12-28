@@ -124,6 +124,7 @@ obj-$(CONFIG_MFD_MAX8997)	+= max8997.o max8997-irq.o
 obj-$(CONFIG_MFD_MAX8998)	+= max8998.o max8998-irq.o
 obj-$(CONFIG_MFD_MAX77833)      += max77833.o max77833-irq.o
 obj-$(CONFIG_MFD_MAX77854)	+= max77854.o max77854-irq.o
+obj-$(CONFIG_MFD_SM5703)	+= sm5703.o sm5703-irq.o sm5703_core.o sm5703_irq.o
 
 pcf50633-objs			:= pcf50633-core.o pcf50633-irq.o
 obj-$(CONFIG_MFD_PCF50633)	+= pcf50633.o
@@ -189,4 +190,4 @@ obj-$(CONFIG_WCD9330_CODEC)	+= wcd9xxx-core.o wcd9xxx-irq.o wcd9xxx-slimslave.o\
 						wcd9xxx-core-resource.o wcd9330-regmap.o
 obj-$(CONFIG_WCD9335_CODEC)	+= wcd9xxx-core.o wcd9xxx-irq.o wcd9xxx-slimslave.o\
 					wcd9xxx-core-resource.o wcd9335-regmap.o\
-					wcd9335-tables.o
+					wcd9335-tables.o wcd-gpio-ctrl.o

@@ -27,6 +27,9 @@
 #if defined (CONFIG_CAMERA_SYSFS_V2)
 extern char rear_cam_info[100];		//camera_info
 extern char front_cam_info[100];	//camera_info
+#if defined(CONFIG_SEC_GRACEQLTE_PROJECT)
+extern char iris_cam_info[100];	//camera_info
+#endif
 #endif
 
 static struct v4l2_file_operations msm_sensor_v4l2_subdev_fops;
@@ -908,11 +911,7 @@ CSID_TG:
 	}
 
 	/* Power up and probe sensor */
-#if defined(CONFIG_SAMSUNG_QUICK_SWITCHING)
-	rc = s_ctrl->func_tbl->sensor_power_up_full(s_ctrl);
-#else
 	rc = s_ctrl->func_tbl->sensor_power_up(s_ctrl);
-#endif
 	if (rc < 0) {
 		pr_err("%s power up failed", slave_info->sensor_name);
 		goto free_camera_info;
@@ -949,11 +948,7 @@ CSID_TG:
 	}
 
 	/* Power down */
-#if defined(CONFIG_SAMSUNG_QUICK_SWITCHING)
-	s_ctrl->func_tbl->sensor_power_down_full(s_ctrl);
-#else
 	s_ctrl->func_tbl->sensor_power_down(s_ctrl);
-#endif
 
 	rc = msm_sensor_fill_slave_info_init_params(
 		slave_info,
@@ -970,7 +965,7 @@ CSID_TG:
 	}
 	/* Update sensor mount angle and position in media entity flag */
 	is_yuv = (slave_info->output_format == MSM_SENSOR_YCBCR) ? 1 : 0;
-	mount_pos = is_yuv << 25 |
+	mount_pos = ((s_ctrl->is_secure & 0x1) << 26) | is_yuv << 25 |
 		(s_ctrl->sensordata->sensor_info->position << 16) |
 		((s_ctrl->sensordata->
 		sensor_info->sensor_mount_angle / 90) << 8);
@@ -985,11 +980,7 @@ CSID_TG:
 	return rc;
 
 camera_power_down:
-#if defined(CONFIG_SAMSUNG_QUICK_SWITCHING)
-	s_ctrl->func_tbl->sensor_power_down_full(s_ctrl);
-#else
 	s_ctrl->func_tbl->sensor_power_down(s_ctrl);
-#endif
 free_camera_info:
 	kfree(camera_info);
 free_slave_info:
@@ -1068,6 +1059,7 @@ static int32_t msm_sensor_driver_get_dt_data(struct msm_sensor_ctrl_t *s_ctrl)
 	struct device_node                  *of_node = s_ctrl->of_node;
 	uint32_t cell_id;
 
+	CDBG("Enter");
 	s_ctrl->sensordata = kzalloc(sizeof(*sensordata), GFP_KERNEL);
 	if (!s_ctrl->sensordata) {
 		pr_err("failed: no memory");
@@ -1124,6 +1116,16 @@ static int32_t msm_sensor_driver_get_dt_data(struct msm_sensor_ctrl_t *s_ctrl)
 		goto FREE_VREG_DATA;
 	}
 
+	/* Get custom mode */
+	rc = of_property_read_u32(of_node, "qcom,secure",
+		&s_ctrl->is_secure);
+	CDBG("qcom,secure = %d, rc %d", s_ctrl->is_secure, rc);
+	if (rc < 0) {
+		/* Set default to non-secure mode */
+		s_ctrl->is_secure = 0;
+		rc = 0;
+	}
+
 	/* Get CCI master */
 	rc = of_property_read_u32(of_node, "qcom,cci-master",
 		&s_ctrl->cci_i2c_master);
@@ -1173,13 +1175,21 @@ static int32_t msm_sensor_driver_get_dt_data(struct msm_sensor_ctrl_t *s_ctrl)
 	if (cell_id == 0) {
 		rc = msm_camera_get_dt_camera_info(of_node, rear_cam_info);
 		if (rc < 0) {
-			pr_err("failed: msm_camera_get_dt_camera_info rc %d", rc);
+			pr_err("failed: msm_camera_get_dt_camera_info for rear rc %d", rc);
 			goto FREE_VREG_DATA;
 		}
+#if defined(CONFIG_SEC_GRACEQLTE_PROJECT)
+	} else if (cell_id == 3) {
+		rc = msm_camera_get_dt_camera_info(of_node, iris_cam_info);
+		if (rc < 0) {
+			pr_err("failed: msm_camera_get_dt_camera_info for iris rc %d", rc);
+			goto FREE_VREG_DATA;
+		}
+#endif
 	} else {
 		rc = msm_camera_get_dt_camera_info(of_node, front_cam_info);
 		if (rc < 0) {
-			pr_err("failed: msm_camera_get_dt_camera_info rc %d", rc);
+			pr_err("failed: msm_camera_get_dt_camera_info for front rc %d", rc);
 			goto FREE_VREG_DATA;
 		}
 	}
@@ -1368,6 +1378,7 @@ static const struct i2c_device_id i2c_id[] = {
 	{ }
 };
 
+#if 0
 static struct i2c_driver msm_sensor_driver_i2c = {
 	.id_table = i2c_id,
 	.probe  = msm_sensor_driver_i2c_probe,
@@ -1376,6 +1387,19 @@ static struct i2c_driver msm_sensor_driver_i2c = {
 		.name = SENSOR_DRIVER_I2C,
 	},
 };
+#else
+static struct i2c_driver msm_sensor_driver_i2c = {
+	.id_table = i2c_id,
+	.probe  = msm_sensor_driver_i2c_probe,
+	.remove = msm_sensor_driver_i2c_remove,
+	.driver = {
+		.name = "qcom,camera",
+		.owner = THIS_MODULE,
+		.of_match_table = msm_sensor_driver_dt_match,
+	},
+};
+
+#endif
 
 static int __init msm_sensor_driver_init(void)
 {

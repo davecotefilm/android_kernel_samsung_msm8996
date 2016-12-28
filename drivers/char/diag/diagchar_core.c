@@ -1400,7 +1400,8 @@ static int diag_md_session_check(int curr_mode, int req_mode,
 		return -EINVAL;
 	} else if (curr_mode == DIAG_MEMORY_DEVICE_MODE) {
 		if (req_mode == DIAG_USB_MODE) {
-			if (driver->md_session_mask != 0) {
+			if (driver->md_session_mask != 0 &&
+				driver->md_session_mode == DIAG_MD_PERIPHERAL) {
 				/*
 				 * An instance of mdlog is still running, Return
 				 * error.
@@ -1509,11 +1510,20 @@ static int diag_switch_logging(struct diag_logging_mode_param_t *param)
 	DIAG_LOG(DIAG_DEBUG_USERSPACE,
 		 "request to switch logging from: %d to %d\n",
 		 curr_mode, new_mode);
-	if (param->req_mode == MEMORY_DEVICE_MODE && driver->md_session_mask == 0)
-		msm_bus_floor_vote("bimc", 300000000);
+	if (param->req_mode == MEMORY_DEVICE_MODE && 
+	        param->peripheral_mask != MD_PERIPHERAL_MASK(PERIPHERAL_SENSORS) &&
+	        (driver->md_session_mask & ~MD_PERIPHERAL_MASK(PERIPHERAL_SENSORS)) == 0)
+	{
+	        WARN(1, "diag_switch_logging: BIMC voting %d\n", 300000000);
+	        msm_bus_floor_vote_context("bimc", 300000000, 1);
+	}
 	else {
-		if (param->req_mode != MEMORY_DEVICE_MODE && driver->md_session_mask == 0)
-			msm_bus_floor_vote("bimc", 0);
+	        if (param->req_mode != MEMORY_DEVICE_MODE &&
+	            (driver->md_session_mask & ~MD_PERIPHERAL_MASK(PERIPHERAL_SENSORS)) == 0)
+	        {
+	            WARN(1, "diag_switch_logging: BIMC voting %d\n", 0);
+	            msm_bus_floor_vote_context("bimc", 0, 1);
+	        }
 	}
 	err = diag_md_session_check(curr_mode, new_mode, param, &do_switch);
 	if (err) {
@@ -3324,6 +3334,7 @@ static int __init diagchar_init(void)
 	mutex_init(&driver->diag_file_mutex);
 	mutex_init(&driver->delayed_rsp_mutex);
 	mutex_init(&apps_data_mutex);
+	mutex_init(&driver->diagfwd_channel_mutex);
 	init_waitqueue_head(&driver->wait_q);
 	INIT_WORK(&(driver->diag_drain_work), diag_drain_work_fn);
 	INIT_WORK(&(driver->update_user_clients),

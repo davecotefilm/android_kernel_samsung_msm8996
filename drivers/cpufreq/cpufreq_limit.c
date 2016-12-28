@@ -416,7 +416,7 @@ static int cpufreq_limit_notifier_policy(struct notifier_block *nb,
 #if defined(USE_MATCH_CPU_VOL_MIN_FREQ)
 		/* boost case */
 		if (min)
-			adjust_min = msm_match_cpu_voltage(min);
+			adjust_min = msm_match_cpu_voltage_btol(min);
 
 		if (adjust_min)
 			min = adjust_min;
@@ -425,7 +425,7 @@ static int cpufreq_limit_notifier_policy(struct notifier_block *nb,
 		/* thermal case */
 		if (max && (max < hmp_param.little_max_freq) &&
 			(max >= hmp_param.little_limit_max_freq)) {
-			adjust_max = msm_match_cpu_voltage(max);
+			adjust_max = msm_match_cpu_voltage_btol(max);
 
 			if (adjust_max)
 				max = MAX(adjust_max,

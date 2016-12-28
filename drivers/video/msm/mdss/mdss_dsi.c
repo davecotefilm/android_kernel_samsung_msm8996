@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -242,6 +242,11 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 		pr_err("%s: failed to disable vregs for %s\n",
 			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	if (mdss_samsung_panel_extra_power(pdata, 0))
+		pr_err("%s : failed to disable extra power\n", __func__);
+#endif
+
 end:
 	return ret;
 }
@@ -268,6 +273,11 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 		return ret;
 	}
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	if (mdss_samsung_panel_extra_power(pdata, 1))
+		pr_err("%s : failed to enable extra power\n", __func__);
+#endif
+
 	/*
 	 * If continuous splash screen feature is enabled, then we need to
 	 * request all the GPIOs that have already been configured in the
@@ -291,7 +301,74 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 static int mdss_dsi_panel_power_lp(struct mdss_panel_data *pdata, int enable)
 {
 	/* Panel power control when entering/exiting lp mode */
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	int i;
+	int rc=0;
+	int get_voltage;
+	unsigned num_vreg;
+	struct dss_vreg *target_vreg;
+	struct dss_vreg *panel_vreg = NULL;
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	struct samsung_display_driver_data *vdd = NULL;
+
+	if (pdata == NULL) {
+		pr_err("%s: Invalid input data\n", __func__);
+		return -EINVAL;
+	}
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+
+	vdd = check_valid_ctrl(ctrl_pdata);
+	if (IS_ERR_OR_NULL(vdd)) {
+		pr_err("%s: Invalid data ctrl : 0x%zx\n", __func__, (size_t)vdd);
+		return -EINVAL;
+	}
+
+	if (!vdd->lpm_power_control || !vdd->lpm_power_control_supply_name) {
+		pr_err("%s: No panel power control for lp \n", __func__);
+		return rc;
+	}
+
+	panel_vreg = ctrl_pdata->panel_power_data.vreg_config;
+
+	/* Find vreg for LPM setting */
+	num_vreg = ctrl_pdata->panel_power_data.num_vreg;
+	for (i = 0; i < num_vreg; i++) {
+		if (!strcmp(panel_vreg[i].vreg_name, vdd->lpm_power_control_supply_name)) {
+			pr_info("Found Voltage\n");
+			target_vreg = &panel_vreg[i];
+			break;
+		}
+	}
+
+	if (enable) {
+		rc = regulator_set_voltage(
+					target_vreg->vreg,
+					vdd->lpm_power_control_supply_min_voltage,
+					vdd->lpm_power_control_supply_max_voltage);
+		get_voltage = regulator_get_voltage(target_vreg->vreg);
+		pr_info("%s : enable=%d, get_voltage=%d\n", __func__, enable, get_voltage);
+		if (get_voltage != vdd->lpm_power_control_supply_min_voltage)
+			panic("Voltage Set Fail to LPM");
+
+	} else {
+		rc = regulator_set_voltage(
+					target_vreg->vreg,
+					target_vreg->min_voltage,
+					target_vreg->max_voltage);
+		get_voltage = regulator_get_voltage(target_vreg->vreg);
+		pr_info("%s : enable=%d, get_voltage=%d\n", __func__, enable, get_voltage);
+		if (get_voltage != target_vreg->min_voltage)
+			panic("Voltage Set Fail to NORMAL");
+	}
+
+	pr_info("%s : enable=%d\n", __func__, enable);
+
+	return rc;
+#else
 	return 0;
+#endif
 }
 
 static int mdss_dsi_panel_power_ctrl(struct mdss_panel_data *pdata,
@@ -620,8 +697,10 @@ static ssize_t mdss_dsi_cmd_state_write(struct file *file,
 		return -ENOMEM;
 	}
 
-	if (copy_from_user(input, p, count))
+	if (copy_from_user(input, p, count)) {
+		kfree(input);
 		return -EFAULT;
+	}
 	input[count-1] = '\0';
 
 	if (strnstr(input, "dsi_hs_mode", strlen("dsi_hs_mode")))
@@ -1068,7 +1147,7 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata, int power_state)
 	}
 
 	if (mdss_panel_is_power_on(power_state)) {
-		pr_debug("%s: dsi_off with panel always on\n", __func__);
+		pr_info("%s: dsi_off with panel always on\n", __func__);
 		goto panel_power_ctrl;
 	}
 
@@ -1215,8 +1294,6 @@ static int mdss_dsi_update_panel_config(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
 	ctrl_pdata->panel_mode = pinfo->mipi.mode;
 	mdss_panel_get_dst_fmt(pinfo->bpp, pinfo->mipi.mode,
 			pinfo->mipi.pixel_packing, &(pinfo->mipi.dst_format));
-	pinfo->cont_splash_enabled = 0;
-
 	return ret;
 }
 
@@ -1302,6 +1379,16 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 		pr_debug("%s: dsi_on from panel low power state\n", __func__);
 		goto end;
 	}
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	if (vdd->support_hall_ic) {
+		/* Panel Select */
+		if (vdd->display_status_dsi[DISPLAY_1].hall_ic_status == HALL_IC_OPEN)
+			mdss_samsung_dsi_pinctrl_set_state(ctrl_pdata, SAMSUNG_GPIO_CONTROL0, false); /*OPEN : Internal PANEL */
+		else
+			mdss_samsung_dsi_pinctrl_set_state(ctrl_pdata, SAMSUNG_GPIO_CONTROL0, true); /*CLOSE : External PANEL */
+	}
+#endif
 
 	/*
 	 * Enable DSI clocks.
@@ -1464,7 +1551,6 @@ static int mdss_dsi_pinctrl_init(struct platform_device *pdev)
 		pr_warn("%s: can not get sleep pinstate\n", __func__);
 
 #if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
-/*
 	ctrl_pdata->pin_res.samsung_gpio_control0_state_active
 		= pinctrl_lookup_state(ctrl_pdata->pin_res.pinctrl,
 				SAMSUNG_DISPLAY_PINCTRL0_STATE_DEFAULT);
@@ -1476,7 +1562,6 @@ static int mdss_dsi_pinctrl_init(struct platform_device *pdev)
 				SAMSUNG_DISPLAY_PINCTRL0_STATE_SLEEP);
 	if (IS_ERR_OR_NULL(ctrl_pdata->pin_res.samsung_gpio_control0_state_suspend))
 		pr_warn("%s: can not get sleep pinstate\n", __func__);
-*/
 #endif
 
 	return 0;
@@ -1512,7 +1597,7 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 				  MDSS_DSI_ALL_CLKS, MDSS_DSI_CLK_ON);
 
 	if (pdata->panel_info.blank_state == MDSS_PANEL_BLANK_LOW_POWER) {
-		pr_debug("%s: dsi_unblank with panel always on\n", __func__);
+		pr_info("%s: dsi_unblank with panel always on\n", __func__);
 		if (ctrl_pdata->low_power_config)
 			ret = ctrl_pdata->low_power_config(pdata, false);
 		goto error;
@@ -1581,7 +1666,7 @@ static int mdss_dsi_blank(struct mdss_panel_data *pdata, int power_state)
 			  MDSS_DSI_ALL_CLKS, MDSS_DSI_CLK_ON);
 
 	if (mdss_panel_is_power_on_lp(power_state)) {
-		pr_debug("%s: low power state requested\n", __func__);
+		pr_info("%s: low power state requested\n", __func__);
 		if (ctrl_pdata->low_power_config)
 			ret = ctrl_pdata->low_power_config(pdata, true);
 		goto error;
@@ -2149,10 +2234,10 @@ static int mdss_dsi_reset_write_ptr(struct mdss_panel_data *pdata)
 	pinfo->roi.h = pinfo->yres;
 
 	mdss_dsi_set_stream_size(pdata);
-
+#if !defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
 	if (pinfo->compression_mode == COMPRESSION_DSC)
-		//mdss_dsi_panel_dsc_pps_send(ctrl_pdata, pinfo);
-
+		mdss_dsi_panel_dsc_pps_send(ctrl_pdata, pinfo);
+#endif
 	if (ctrl_pdata->set_col_page_addr)
 		rc = ctrl_pdata->set_col_page_addr(pdata, true);
 
@@ -2273,10 +2358,12 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 			rc = mdss_dsi_blank(pdata, MDSS_PANEL_POWER_OFF);
 		}
 		break;
+#if !defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
 	case MDSS_EVENT_DSC_PPS_SEND:
 		if (pinfo->compression_mode == COMPRESSION_DSC)
 			mdss_dsi_panel_dsc_pps_send(ctrl_pdata, pinfo);
 		break;
+#endif
 	case MDSS_EVENT_ENABLE_PARTIAL_ROI:
 		rc = mdss_dsi_ctl_partial_roi(pdata);
 		break;
@@ -2397,6 +2484,7 @@ static struct device_node *mdss_dsi_find_panel_of_node(
 	struct mdss_panel_info *pinfo = &ctrl_pdata->panel_data.panel_info;
 
 	len = strlen(panel_cfg);
+	ctrl_pdata->panel_data.dsc_cfg_np_name[0] = '\0';
 	if (!len) {
 		/* no panel cfg chg, parse dt */
 		pr_err("%s:%d: no cmd line cfg present\n",
@@ -2478,16 +2566,8 @@ static struct device_node *mdss_dsi_find_panel_of_node(
 					strlcpy(cfg_np_name, str2,
 						MDSS_MAX_PANEL_LEN);
 				}
-			}
-
-			pr_debug("%s: cfg_np_name:%s\n", __func__, cfg_np_name);
-			if (str2) {
-				ctrl_pdata->panel_data.cfg_np =
-					of_get_child_by_name(dsi_pan_node,
-					cfg_np_name);
-				if (!ctrl_pdata->panel_data.cfg_np)
-					pr_warn("%s: can't find config node:%s. either no such node or bad name\n",
-						__func__, cfg_np_name);
+				strlcpy(ctrl_pdata->panel_data.dsc_cfg_np_name,
+					cfg_np_name, MDSS_MAX_PANEL_LEN);
 			}
 		}
 		return dsi_pan_node;

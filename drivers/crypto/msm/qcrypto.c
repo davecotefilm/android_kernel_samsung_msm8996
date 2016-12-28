@@ -1,6 +1,6 @@
 /* Qualcomm Crypto driver
  *
- * Copyright (c) 2010-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -704,10 +704,6 @@ static size_t qcrypto_sg_copy_from_buffer(struct scatterlist *sgl,
 	size_t offset, len;
 
 	for (i = 0, offset = 0; i < nents; ++i) {
-		if (NULL == sgl) {
-			pr_err("qcrypto.c: qcrypto_sg_copy_from_buffer, sgl = NULL");
-			break;
-		}
 		len = sg_copy_from_buffer(sgl, 1, buf, buflen);
 		buf += len;
 		buflen -= len;
@@ -725,10 +721,6 @@ static size_t qcrypto_sg_copy_to_buffer(struct scatterlist *sgl,
 	size_t offset, len;
 
 	for (i = 0, offset = 0; i < nents; ++i) {
-		if (NULL == sgl) {
-			pr_err("qcrypto.c: qcrypto_sg_copy_from_buffer, sgl = NULL");
-			break;
-		}
 		len = sg_copy_to_buffer(sgl, 1, buf, buflen);
 		buf += len;
 		buflen -= len;
@@ -1527,8 +1519,7 @@ static void _qce_ahash_complete(void *cookie, unsigned char *digest,
 #endif
 	if (digest) {
 		memcpy(rctx->digest, digest, diglen);
-		if (rctx->last_blk)
-			memcpy(areq->result, digest, diglen);
+		memcpy(areq->result, digest, diglen);
 	}
 	if (authdata) {
 		rctx->byte_count[0] = auth32[0];
@@ -2090,12 +2081,12 @@ static int _qcrypto_process_aead(struct  crypto_engine *pengine,
 			 * include  assoicated data, ciphering data stream,
 			 * generated MAC, and CCM padding.
 			 */
-			if ((MAX_ALIGN_SIZE * 2 > UINT_MAX - req->assoclen) ||
+			if ((MAX_ALIGN_SIZE * 2 > ULONG_MAX - req->assoclen) ||
 				((MAX_ALIGN_SIZE * 2 + req->assoclen) >
-						UINT_MAX - qreq.ivsize) ||
+						ULONG_MAX - qreq.ivsize) ||
 				((MAX_ALIGN_SIZE * 2 + req->assoclen
 					+ qreq.ivsize)
-						> UINT_MAX - req->cryptlen)) {
+						> ULONG_MAX - req->cryptlen)) {
 				pr_err("Integer overflow on aead req length.\n");
 				return -EINVAL;
 			}
@@ -3533,10 +3524,6 @@ static int _sha_update(struct ahash_request  *req, uint32_t sha_block_size)
 			break;
 		len += sg_last->length;
 		sg_last = scatterwalk_sg_next(sg_last);
-		if (NULL == sg_last) {
-			pr_err("qcrypto.c: _sha_update, sg_last = NULL");
-			break;
-		}
 	}
 	if (rctx->trailing_buf_len) {
 		if (cp->ce_support.aligned_only)  {
@@ -3558,10 +3545,7 @@ static int _sha_update(struct ahash_request  *req, uint32_t sha_block_size)
 			req->src = rctx->sg;
 			sg_mark_end(&rctx->sg[0]);
 		} else {
-			if (sg_last)
-				sg_mark_end(sg_last);
-			else
-				pr_err("qcrypto: _sha_update, sg_last= NULL");
+			sg_mark_end(sg_last);
 			memset(rctx->sg, 0, sizeof(rctx->sg));
 			sg_set_buf(&rctx->sg[0], staging,
 						rctx->trailing_buf_len);
@@ -3570,10 +3554,7 @@ static int _sha_update(struct ahash_request  *req, uint32_t sha_block_size)
 			req->src = rctx->sg;
 		}
 	} else
-		if (sg_last)
-			sg_mark_end(sg_last);
-		else
-			pr_err("qcrypto.c: _sha_update, sg_last = NULL");
+		sg_mark_end(sg_last);
 
 	req->nbytes = nbytes;
 	rctx->trailing_buf_len = trailing_buf_len;

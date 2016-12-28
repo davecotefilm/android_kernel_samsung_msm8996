@@ -14,9 +14,14 @@
 */
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/dirent.h>
 #include "adsp.h"
 #define VENDOR "AMS"
+#ifdef CONFIG_SUPPORT_TMD4904_FACTORY
+#define CHIP_ID "TMD4904"
+#else
 #define CHIP_ID "TMD4903"
+#endif
 
 /*************************************************************************/
 /* factory Sysfs							 */
@@ -69,6 +74,7 @@ static ssize_t light_data_show(struct device *dev,
 		data->sensor_data[ADSP_FACTORY_LIGHT].a_gain);
 }
 
+
 static DEVICE_ATTR(vendor, S_IRUGO, light_vendor_show, NULL);
 static DEVICE_ATTR(name, S_IRUGO, light_name_show, NULL);
 static DEVICE_ATTR(lux, S_IRUGO, light_lux_show, NULL);
@@ -85,7 +91,6 @@ static struct device_attribute *light_attrs[] = {
 static int __init tmd490x_light_factory_init(void)
 {
 	adsp_factory_register(ADSP_FACTORY_LIGHT, light_attrs);
-
 	pr_info("[FACTORY] %s\n", __func__);
 
 	return 0;
@@ -94,8 +99,8 @@ static int __init tmd490x_light_factory_init(void)
 static void __exit tmd490x_light_factory_exit(void)
 {
 	adsp_factory_unregister(ADSP_FACTORY_LIGHT);
-
 	pr_info("[FACTORY] %s\n", __func__);
 }
 module_init(tmd490x_light_factory_init);
 module_exit(tmd490x_light_factory_exit);
+

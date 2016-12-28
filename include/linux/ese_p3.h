@@ -46,8 +46,14 @@
 /* To swing(shake) cs */
 #define P3_SWING_CS _IOW(P3_MAGIC, 0x0D, unsigned long)
 
-#define ESE_LDO_ON  1
-#define ESE_LDO_OFF 0
+#ifdef CONFIG_COMPAT
+#define P3_RW_SPI_DATA_32 _IOWR(P3_MAGIC, 0x07, unsigned int)
+struct spip3_ioc_transfer_32 {
+    unsigned int   rx_buffer;
+    unsigned int   tx_buffer;
+    unsigned short  len;
+};
+#endif
 
 struct p3_ioctl_transfer {
 	unsigned char *rx_buffer;

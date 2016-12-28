@@ -885,7 +885,9 @@ static void acm_unbind(struct usb_configuration *c, struct usb_function *f)
 #ifdef CONFIG_USB_DUN_SUPPORT
 	modem_unregister();
 #endif
+#ifndef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 	acm_string_defs[0].id = 0;
+#endif
 	usb_free_all_descriptors(f);
 	if (acm->notify_req)
 		gs_free_req(acm->notify, acm->notify_req);

@@ -17,6 +17,8 @@
 #include <linux/workqueue.h>
 #include <linux/cpu.h>
 #include <linux/moduleparam.h>
+#include <linux/debugfs.h>
+#include <linux/uaccess.h>
 
 #include "public/mc_user.h"
 #include "public/mc_linux_api.h"
@@ -27,9 +29,6 @@
 #include "main.h"
 #include "clock.h"	/* mc_clock_enable, mc_clock_disable */
 #include "fastcall.h"
-#ifdef CONFIG_RKP_CFP_FIX_SMC_BUG
-#include <linux/rkp_cfp.h>
-#endif
 
 struct fastcall_work {
 #ifdef MC_FASTCALL_WORKER_THREAD
@@ -154,13 +153,7 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 		 * the asm code might clobber them.
 		 */
 		__asm__ volatile (
-#ifdef CONFIG_RKP_CFP_FIX_SMC_BUG
-			PRE_SMC_INLINE
-#endif
 			"smc #0\n"
-#ifdef CONFIG_RKP_CFP_FIX_SMC_BUG
-			POST_SMC_INLINE
-#endif
 			: "+r"(reg0), "+r"(reg1), "+r"(reg2), "+r"(reg3)
 			:
 			: "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
@@ -181,13 +174,7 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 			 */
 			".arch_extension sec\n"
 #endif /* MC_ARCH_EXTENSION_SEC */
-#ifdef CONFIG_RKP_CFP_FIX_SMC_BUG
-			PRE_SMC_INLINE
-#endif
 			"smc #0\n"
-#ifdef CONFIG_RKP_CFP_FIX_SMC_BUG
-			POST_SMC_INLINE
-#endif
 			: "+r"(reg0), "+r"(reg1), "+r"(reg2), "+r"(reg3)
 		);
 
@@ -217,7 +204,7 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 }
 
 #ifdef TBASE_CORE_SWITCHER
-static u32 active_cpu;
+static int active_cpu;
 
 #ifdef MC_FASTCALL_WORKER_THREAD
 static void mc_cpu_offline(int cpu)
@@ -245,17 +232,17 @@ static void mc_cpu_offline(int cpu)
 static int mobicore_cpu_callback(struct notifier_block *nfb,
 				 unsigned long action, void *hcpu)
 {
-	unsigned int cpu = (unsigned long)hcpu;
+	int cpu = (int)(uintptr_t)hcpu;
 
 	switch (action) {
 	case CPU_DOWN_PREPARE:
 	case CPU_DOWN_PREPARE_FROZEN:
-		mc_dev_info("Cpu %u is going to die\n", cpu);
+		mc_dev_info("Cpu %d is going to die\n", cpu);
 		mc_cpu_offline(cpu);
 		break;
 	case CPU_DEAD:
 	case CPU_DEAD_FROZEN:
-		mc_dev_info("Cpu %u is dead\n", cpu);
+		mc_dev_info("Cpu %d is dead\n", cpu);
 		break;
 	}
 	return NOTIFY_OK;
@@ -269,7 +256,7 @@ static struct notifier_block mobicore_cpu_notifer = {
 static cpumask_t mc_exec_core_switch(union mc_fc_generic *mc_fc_generic)
 {
 	cpumask_t cpu;
-	u32 new_cpu;
+	int new_cpu;
 	u32 cpu_id[] = CPU_IDS;
 
 	new_cpu = mc_fc_generic->as_in.param[0];
@@ -289,6 +276,28 @@ static cpumask_t mc_exec_core_switch(union mc_fc_generic *mc_fc_generic)
 	cpumask_set_cpu(active_cpu, &cpu);
 	return cpu;
 }
+
+static ssize_t debug_coreswitch_write(struct file *file,
+				      const char __user *buffer,
+				      size_t buffer_len, loff_t *x)
+{
+	int new_cpu = 0;
+
+	/* Invalid data, nothing to do */
+	if (buffer_len < 1)
+		return -EINVAL;
+
+	if (kstrtouint_from_user(buffer, buffer_len, 0, &new_cpu))
+		return -EINVAL;
+
+	mc_dev_devel("Set active cpu to %d\n", new_cpu);
+	mc_switch_core(new_cpu);
+	return buffer_len;
+}
+
+static const struct file_operations mc_debug_coreswitch_ops = {
+	.write = debug_coreswitch_write,
+};
 #else /* TBASE_CORE_SWITCHER */
 static inline cpumask_t mc_exec_core_switch(union mc_fc_generic *mc_fc_generic)
 {
@@ -376,6 +385,9 @@ int mc_fastcall_init(void)
 	wake_up_process(fastcall_thread);
 #ifdef TBASE_CORE_SWITCHER
 	ret = register_cpu_notifier(&mobicore_cpu_notifer);
+	/* Create debugfs structs entry */
+	debugfs_create_file("active_cpu", 0600, g_ctx.debug_dir, NULL,
+			    &mc_debug_coreswitch_ops);
 #endif
 #endif /* MC_FASTCALL_WORKER_THREAD */
 	return ret;
@@ -558,30 +570,30 @@ int mc_fastcall_debug_smclog(struct kasnprintf_buf *buf)
 }
 
 #ifdef TBASE_CORE_SWITCHER
-u32 mc_active_core(void)
+int mc_active_core(void)
 {
 	return active_cpu;
 }
 
-int mc_switch_core(u32 core_num)
+int mc_switch_core(int cpu)
 {
 	s32 ret = 0;
 	union mc_fc_swich_core fc_switch_core;
 
-	if (!cpu_online(core_num))
+	if (!cpu_online(cpu))
 		return 1;
 
 	memset(&fc_switch_core, 0, sizeof(fc_switch_core));
 	fc_switch_core.as_in.cmd = MC_FC_SWAP_CPU;
-	if (core_num < COUNT_OF_CPUS)
-		fc_switch_core.as_in.core_id = core_num;
+	if (cpu < COUNT_OF_CPUS)
+		fc_switch_core.as_in.core_id = cpu;
 	else
 		fc_switch_core.as_in.core_id = 0;
 
 	mc_dev_devel("<- cmd=0x%08x, core_id=0x%08x\n",
 		     fc_switch_core.as_in.cmd, fc_switch_core.as_in.core_id);
-	mc_dev_devel("<- core_num=0x%08x, active_cpu=0x%08x\n",
-		     core_num, active_cpu);
+	mc_dev_devel("<- cpu=0x%08x, active_cpu=0x%08x\n",
+		     cpu, active_cpu);
 	mc_fastcall(&fc_switch_core.as_generic);
 	ret = convert_fc_ret(fc_switch_core.as_out.ret);
 	mc_dev_devel("exit with %d/0x%08X\n", ret, ret);

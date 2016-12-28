@@ -2300,6 +2300,8 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 	    || (topology == VPM_TX_SM_LVVEFQ_COPP_TOPOLOGY)
 	    || (topology == VPM_TX_DM_LVVEFQ_COPP_TOPOLOGY)
 	    || (topology == VPM_TX_SM_LVSAFQ_COPP_TOPOLOGY)
+	    || (topology == VOICE_TX_DIAMONDVOICE_FVSAM_DM)
+	    || (topology == VOICE_TX_DIAMONDVOICE_FVSAM_QM)
 #endif /* CONFIG_SEC_VOC_SOLUTION */
 	    )
 		rate = 16000;

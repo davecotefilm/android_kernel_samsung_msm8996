@@ -66,7 +66,6 @@
 		/* Reserved Mem for Camera */
 		camera_mem: camera_mem_region@0xC0000000 {
 			compatible = "removed-dma-pool";
-			no-map;
 			reg = <0x0 0xC0000000 0x0 0x14800000>;
 		};
 	};
@@ -360,6 +359,15 @@
 				 <&det_zones 691 1>,
 				 <&det_zones 9999 1>;
 
+		mbhc-button-thres = <&det_zones 13 63>,
+				 <&det_zones 88 138>,
+				 <&det_zones 138 138>,
+				 <&det_zones 225 225>,
+				 <&det_zones 450 450>,
+				 <&det_zones 470 470>,
+				 <&det_zones 470 470>,
+				 <&det_zones 650 650>;
+
 		/delete-property/qcom,hdmi-audio-rx;
 		/delete-property/qcom,hph-en0-gpio;
 		/delete-property/qcom,us-euro-gpios;
@@ -425,14 +433,20 @@
 	qcom,gpio-connect = <&tlmm 79 0>;
 };
 
+&wcd_rst_gpio {
+	compatible = "qcom,wcd-gpio-ctrl";
+	qcom,cdc-rst-n-gpio = <&tlmm 74 0>;
+	pinctrl-names = "aud_active", "aud_sleep";
+	pinctrl-0 = <&cdc_reset_gpio_active>;
+	pinctrl-1 = <&cdc_reset_gpio_suspend>;
+};
+	
 &slim_msm {
+	/delete-node/msm_dai_slim;
+
 	tasha_codec {
-		qcom,cdc-reset-gpio = <&tlmm 74 0>;
 		qcom,cdc-micbias2-mv = <2700>;
 		qcom,cdc-dmic-sample-rate = <2400000>;
-  		pinctrl-names = "default", "suspend";
-		pinctrl-0 = <&cdc_reset_gpio_active>;
-		pinctrl-1 = <&cdc_reset_gpio_suspend>;
 		/delete-node/swr_master;
 	};
 };

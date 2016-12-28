@@ -60,10 +60,6 @@ struct msm_sensor_fn_t {
 #endif
 	int (*sensor_power_down)(struct msm_sensor_ctrl_t *);
 	int (*sensor_power_up)(struct msm_sensor_ctrl_t *);
-#if defined(CONFIG_SAMSUNG_QUICK_SWITCHING)
-	int (*sensor_power_down_full)(struct msm_sensor_ctrl_t *);
-	int (*sensor_power_up_full)(struct msm_sensor_ctrl_t *);
-#endif
 	int (*sensor_match_id)(struct msm_sensor_ctrl_t *);
 };
 
@@ -92,6 +88,7 @@ struct msm_sensor_ctrl_t {
 	enum msm_camera_stream_type_t camera_stream_type;
 	uint32_t set_mclk_23880000;
 	uint8_t is_csid_tg_mode;
+	uint32_t is_secure;
 };
 
 int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp);
@@ -99,12 +96,6 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp);
 int msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl);
 
 int msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl);
-
-#if defined(CONFIG_SAMSUNG_QUICK_SWITCHING)
-int msm_sensor_power_up_full(struct msm_sensor_ctrl_t *s_ctrl);
-
-int msm_sensor_power_down_full(struct msm_sensor_ctrl_t *s_ctrl);
-#endif
 
 int msm_sensor_check_id(struct msm_sensor_ctrl_t *s_ctrl);
 

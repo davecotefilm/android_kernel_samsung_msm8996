@@ -48,6 +48,10 @@
 #include <linux/muic/muic_notifier.h>
 #endif /* CONFIG_MUIC_NOTIFIER */
 
+#if defined(CONFIG_MUIC_SUPPORT_CCIC) && defined(CONFIG_CCIC_NOTIFIER)
+#include <linux/ccic/ccic_notifier.h>
+#endif
+
 #ifdef CONFIG_SWITCH
 static struct switch_dev switch_dock = {
 	.name = "dock",
@@ -57,6 +61,15 @@ struct switch_dev switch_uart3 = {
 	.name = "uart3",	/* sys/class/switch/uart3/state */
 };
 EXPORT_SYMBOL(switch_uart3);
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+static struct switch_dev switch_earjack = {
+	.name = "h2w",          /* /sys/class/switch/h2w/state */
+};
+
+static struct switch_dev switch_earjackkey = {
+	.name = "send_end",     /* /sys/class/switch/send_end/state */
+};
+#endif
 #endif /* CONFIG_SWITCH */
 
 #if defined(CONFIG_MUIC_NOTIFIER)
@@ -78,6 +91,24 @@ void muic_send_dock_intent(int type)
 #endif
 }
 
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+static int muic_earjack_intent(int state)
+{
+	pr_info("%s: MUIC earjack(%d)\n", __func__, state);
+#ifdef CONFIG_SWITCH
+	switch_set_state(&switch_earjack, state);
+#endif
+	return NOTIFY_OK;
+}
+static int muic_earjackkey_intent(int state)
+{
+	pr_info("%s: MUIC earjackkey(%d)\n", __func__, state);
+#ifdef CONFIG_SWITCH
+	switch_set_state(&switch_earjackkey, state);
+#endif
+	return NOTIFY_OK;
+}
+#endif
 static int muic_dock_attach_notify(int type, const char *name)
 {
 	pr_info("%s: %s\n", __func__, name);
@@ -97,14 +128,21 @@ static int muic_dock_detach_notify(void)
 static int muic_handle_dock_notification(struct notifier_block *nb,
 			unsigned long action, void *data)
 {
+#if defined(CONFIG_CCIC_NOTIFIER) && defined(CONFIG_MUIC_SUPPORT_CCIC)
+	CC_NOTI_ATTACH_TYPEDEF *pnoti = (CC_NOTI_ATTACH_TYPEDEF *)data;
+	muic_attached_dev_t attached_dev = pnoti->cable_type;
+#else
 	muic_attached_dev_t attached_dev = *(muic_attached_dev_t *)data;
+#endif
 	int type = MUIC_DOCK_DETACHED;
 	const char *name;
 
 	switch (attached_dev) {
 	case ATTACHED_DEV_DESKDOCK_MUIC:
 	case ATTACHED_DEV_DESKDOCK_VB_MUIC:
+#if defined(CONFIG_SEC_FACTORY)
 	case ATTACHED_DEV_JIG_UART_ON_MUIC:
+#endif
 		if (action == MUIC_NOTIFY_CMD_ATTACH) {
 			type = MUIC_DOCK_DESKDOCK;
 			name = "Desk Dock Attach";
@@ -169,6 +207,18 @@ static int muic_handle_dock_notification(struct notifier_block *nb,
 		} else if (action == MUIC_NOTIFY_CMD_DETACH)
 			return muic_dock_detach_notify();
 		break;
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+	case ATTACHED_DEV_SEND_MUIC:
+	case ATTACHED_DEV_VOLDN_MUIC:
+	case ATTACHED_DEV_VOLUP_MUIC:
+			return muic_earjackkey_intent(1);
+	case ATTACHED_DEV_EARJACK_MUIC:
+		if (action == MUIC_NOTIFY_CMD_ATTACH) {
+			return muic_earjack_intent(1);
+		} else if (action == MUIC_NOTIFY_CMD_DETACH)
+			return muic_earjack_intent(0);
+		break;
+#endif
 	default:
 		break;
 	}
@@ -255,7 +305,19 @@ static void muic_init_switch_dev_cb(void)
 		pr_err("%s : Failed to register switch_uart3 device\n", __func__);
 		goto err_switch_uart3_dev_register;
 	}
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+        ret = switch_dev_register(&switch_earjack);
+        if (ret < 0) {
+                pr_info("%s : Failed to register switch device\n", __func__);
+                goto err_switch_dev_register;
+        }
 
+        ret = switch_dev_register(&switch_earjackkey);
+        if (ret < 0) {
+                pr_info("%s : Failed to register switch device\n", __func__);
+                goto err_switch_dev_register;
+        }
+#endif
 #endif /* CONFIG_SWITCH */
 
 #if defined(CONFIG_MUIC_NOTIFIER)
@@ -265,6 +327,11 @@ static void muic_init_switch_dev_cb(void)
 
 	pr_info("%s: done\n", __func__);
 	return;
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+err_switch_dev_register:
+	switch_dev_unregister(&switch_earjack);
+	switch_dev_unregister(&switch_earjackkey);
+#endif
 err_switch_uart3_dev_register:
 	switch_dev_unregister(&switch_dock);
 }

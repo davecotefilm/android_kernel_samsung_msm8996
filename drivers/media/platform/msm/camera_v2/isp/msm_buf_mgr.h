@@ -190,13 +190,9 @@ struct msm_isp_buf_mgr {
 	struct msm_sd_req_vb2_q *vb2_ops;
 
 	/*IOMMU driver*/
-	int iommu_hdl;
-
-	/*Add secure mode*/
 	int secure_enable;
 
 	int num_iommu_ctx;
-	int num_iommu_secure_ctx;
 	int attach_ref_cnt;
 	enum msm_isp_buf_mgr_state attach_state;
 	struct device *isp_dev;
@@ -204,6 +200,10 @@ struct msm_isp_buf_mgr {
 	/* Scratch buffer */
 	dma_addr_t scratch_buf_addr;
 	uint32_t scratch_buf_range;
+	int ns_iommu_hdl;
+	int sec_iommu_hdl;
+	struct ion_handle *scratch_buf_ion_handle;
+	struct dma_buf *scratch_buf;
 };
 
 int msm_isp_create_isp_buf_mgr(struct msm_isp_buf_mgr *buf_mgr,

@@ -162,6 +162,7 @@ extern const struct inode_operations sdcardfs_main_iops;
 extern const struct inode_operations sdcardfs_dir_iops;
 extern const struct inode_operations sdcardfs_symlink_iops;
 extern const struct super_operations sdcardfs_sops;
+extern const struct super_operations sdcardfs_multimount_sops;
 extern const struct dentry_operations sdcardfs_ci_dops;
 extern const struct address_space_operations sdcardfs_aops, sdcardfs_dummy_aops;
 extern const struct vm_operations_struct sdcardfs_vm_ops;
@@ -176,7 +177,6 @@ extern struct dentry *sdcardfs_lookup(struct inode *dir, struct dentry *dentry,
 				    unsigned int flags);
 extern int sdcardfs_interpose(struct dentry *dentry, struct super_block *sb,
 			    struct path *lower_path);
-extern long sdcardfs_propagate_unlink(struct inode *parent, char* pathname);
 
 #ifdef SDCARD_FS_XATTR
 extern int sdcardfs_setxattr(struct dentry *dentry, const char *name, const void *value, size_t size, int flags);
@@ -212,6 +212,12 @@ struct sdcardfs_dentry_info {
 #ifdef CONFIG_SDP
 	int under_knox;
 	int userid;
+#define PERMISSION_PRE_ROOT 		0
+#define PERMISSION_ROOT 		1
+#define PERMISSION_ANDROID 		2
+#define PERMISSION_UNDER_ANDROID 	3
+	int permission;
+	appid_t appid;	
 #endif	
 };
 

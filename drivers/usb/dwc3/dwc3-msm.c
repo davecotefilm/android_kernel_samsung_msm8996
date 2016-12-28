@@ -883,6 +883,7 @@ static void dwc3_restart_usb_work(struct work_struct *w)
 		dwc3_resume_work(&mdwc->resume_work.work);
 	}
 
+	mdwc->in_restart = false; // 160615 , if vbus is disconnected while processing this function ,then in_restart remains true forever. 
 	dwc->err_evt_seen = false;
 }
 
@@ -1364,7 +1365,6 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc)
 	can_suspend_ssphy = !(mdwc->in_host_mode &&
 				dwc3_msm_is_host_superspeed(mdwc));
 
-	tasklet_kill(&dwc->bh);
 	/* Disable core irq */
 	if (dwc->irq)
 		disable_irq(dwc->irq);
@@ -1876,7 +1876,7 @@ static int dwc3_msm_power_set_property_usb(struct power_supply *psy,
 		return -EINVAL;
 	}
 
-	power_supply_changed(&mdwc->usb_psy);
+	//power_supply_changed(&mdwc->usb_psy);
 	return 0;
 }
 
@@ -2578,10 +2578,6 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 	if (on) {
 		dev_info(mdwc->dev, "%s: turn on host\n", __func__);
 
-#ifdef CONFIG_USB_HOST_NOTIFY
-		usb_phy_set_mode(mdwc->hs_phy, OTG_MODE_HOST);
-#endif
-
 		pm_runtime_get_sync(dwc->dev);
 		dbg_event(0xFF, "StrtHost gync",
 			atomic_read(&dwc->dev->power.usage_count));
@@ -2595,6 +2591,9 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 			return ret;
 		}
 
+#ifdef CONFIG_USB_HOST_NOTIFY
+		usb_phy_set_mode(mdwc->hs_phy, OTG_MODE_HOST);
+#endif
 		dwc3_set_mode(dwc, DWC3_GCTL_PRTCAP_HOST);
 
 		/*

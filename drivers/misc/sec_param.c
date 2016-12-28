@@ -17,15 +17,14 @@
 #include <linux/file.h>
 #include <linux/syscalls.h>
 #include <linux/delay.h>
-
+#ifdef CONFIG_USER_RESET_DEBUG
+#include <linux/qcom/sec_debug.h>
+#endif
 
 #define PARAM_RD	0
 #define PARAM_WR	1
 
 #define SEC_PARAM_FILE_NAME	"/dev/block/platform/soc/624000.ufshc/by-name/param"	/* parameter block */
-#define SEC_PARAM_FILE_SIZE	0xA00000		/* 10MB */
-#define SEC_PARAM_FILE_OFFSET (SEC_PARAM_FILE_SIZE - 0x100000)
-
 
 static DEFINE_MUTEX(sec_param_mutex);
 
@@ -199,6 +198,22 @@ bool sec_get_param(enum sec_param_index index, void *value)
 	case param_index_cp_reserved_mem:
 		memcpy(value, &(param_data->cp_reserved_mem), sizeof(unsigned int));
 		break;
+	case param_index_lcd_resolution:
+		memcpy(value, param_data->param_lcd_resolution, 
+			sizeof(param_data->param_lcd_resolution));
+		break;
+#ifdef CONFIG_USER_RESET_DEBUG
+	case param_index_reset_ex_info:
+		mutex_lock(&sec_param_mutex);
+		sched_sec_param_data.value=value;
+		sched_sec_param_data.offset=SEC_PARAM_EX_INFO_OFFSET;
+		sched_sec_param_data.size=SEC_DEBUG_EX_INFO_SIZE;
+		sched_sec_param_data.direction=PARAM_RD;
+		schedule_work(&sched_sec_param_data.sec_param_work);
+		wait_for_completion(&sched_sec_param_data.work);
+		mutex_unlock(&sec_param_mutex);
+		break;
+#endif
 	default:
 		return false;
 	}
@@ -280,6 +295,15 @@ bool sec_set_param(enum sec_param_index index, void *value)
 		memcpy(&(param_data->cp_reserved_mem),
 				value, sizeof(unsigned int));
 		break;
+	case param_index_lcd_resolution:
+		memcpy(&(param_data->param_lcd_resolution),
+				value, sizeof(param_data->param_lcd_resolution));
+		break;
+#ifdef CONFIG_USER_RESET_DEBUG
+	case param_index_reset_ex_info:
+		// do nothing.
+		break;
+#endif
 	default:
 		return false;
 	}
@@ -287,7 +311,7 @@ bool sec_set_param(enum sec_param_index index, void *value)
 	ret = sec_write_param();
 
 	return ret;
-	}
+}
 EXPORT_SYMBOL(sec_set_param);
 
 static int __init sec_param_work_init(void)
@@ -305,13 +329,13 @@ static int __init sec_param_work_init(void)
 	pr_info("%s: end\n", __func__);
 
 	return 0;
-	}
+}
 
 static void __exit sec_param_work_exit(void)
 {
 	cancel_work_sync(&sched_sec_param_data.sec_param_work);
 	pr_info("%s: exit\n", __func__);
-	}
+}
 
 module_init(sec_param_work_init);
 module_exit(sec_param_work_exit);

@@ -164,6 +164,8 @@
 #define DA9155_START_SLEW_MASK               (0x7 << 4)
 
 /* DA9155_CONTROL_E     = 0xb */
+#define DA9155_TIMER_DIS_SHIFT               4
+#define DA9155_TIMER_DIS_MASK                0x10
 #define DA9155_TJUNC_WARN_SHIFT              0
 #define DA9155_TJUNC_WARN_MASK               0xF
 
@@ -212,20 +214,18 @@
 #define DA9155_OSC_FRQ_SHIFT                 4
 #define DA9155_OSC_FRQ_MASK                  (0xF << 4)
 
+struct da9155_charger_platform_data {
+	int irq_gpio;
+};
+
 struct da9155_charger_data {
 	struct device           *dev;
 	struct i2c_client       *i2c;
 	struct mutex            io_lock;
 
-	sec_charger_platform_data_t *pdata;
+	struct da9155_charger_platform_data *pdata;
 
 	struct power_supply	psy_chg;
-	struct workqueue_struct *wqueue;
-	struct delayed_work	isr_work;
-
-	struct pinctrl *i2c_pinctrl;
-	struct pinctrl_state *i2c_gpio_state_active;
-	struct pinctrl_state *i2c_gpio_state_suspend;
 
 	unsigned int siop_level;
 	unsigned int chg_irq;
@@ -234,8 +234,11 @@ struct da9155_charger_data {
 	unsigned int cable_type;
 	unsigned int charging_current_max;
 	unsigned int charging_current;
+	unsigned int float_voltage;
 
 	u8 addr;
 	int size;
 };
+
+
 #endif	/* __DA9155_CHARGER_H__ */

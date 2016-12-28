@@ -3154,7 +3154,9 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 
 	sd_revalidate_disk(gd);
 
-	scsi_autopm_put_device(sdp);
+	if (!(sdp->host->by_ufs))
+		scsi_autopm_put_device(sdp);
+
 	put_device(&sdkp->dev);
 #ifdef CONFIG_USB_STORAGE_DETECT
 	if (sdp->host->by_usb) {
@@ -3243,6 +3245,11 @@ static int sd_probe(struct device *dev)
 		if (sdp->host->by_ufs)
 			blk_queue_rq_timeout(sdp->request_queue,
 					     SD_UFS_TIMEOUT);
+	}
+
+	if (!sdp->host->by_ufs) {
+		sdp->request_queue->backing_dev_info.max_ratio = 10;
+		sdp->request_queue->backing_dev_info.capabilities |= BDI_CAP_STRICTLIMIT;
 	}
 
 	device_initialize(&sdkp->dev);

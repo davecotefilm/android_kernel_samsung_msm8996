@@ -38,7 +38,7 @@
 /* Face detection bus client name */
 #define MSM_FD_BUS_CLIENT_NAME "msm_face_detect"
 /* Face detection processing timeout in ms */
-#define MSM_FD_PROCESSING_TIMEOUT_MS 500
+#define MSM_FD_PROCESSING_TIMEOUT_MS 150
 /* Face detection halt timeout in ms */
 #define MSM_FD_HALT_TIMEOUT_MS 100
 /* Smmu callback name */
@@ -1471,6 +1471,8 @@ static int msm_fd_hw_enable(struct msm_fd_device *fd,
 	msm_fd_hw_set_direction_angle(fd, buffer->settings.direction_index,
 		buffer->settings.angle_index);
 	msm_fd_hw_run(fd);
+	if (fd->recovery_mode)
+		dev_err(fd->dev, "Scheduled buffer in recovery mode\n");
 	return 1;
 }
 
@@ -1566,6 +1568,8 @@ void msm_fd_hw_remove_buffers_from_queue(struct msm_fd_device *fd,
 		time = wait_for_completion_timeout(&active_buffer->completion,
 			msecs_to_jiffies(MSM_FD_PROCESSING_TIMEOUT_MS));
 		if (!time) {
+			/* Do a vb2 buffer done since it timed out */
+			vb2_buffer_done(&active_buffer->vb, VB2_BUF_STATE_DONE);
 			/* Remove active buffer */
 			msm_fd_hw_get_active_buffer(fd);
 			/* Schedule if other buffers are present in device */
@@ -1672,6 +1676,8 @@ int msm_fd_hw_schedule_next_buffer(struct msm_fd_device *fd)
 		}
 	} else {
 		fd->state = MSM_FD_DEVICE_IDLE;
+		if (fd->recovery_mode)
+			dev_err(fd->dev, "No Buffer in recovery mode.Device Idle\n");
 	}
 	spin_unlock(&fd->slock);
 

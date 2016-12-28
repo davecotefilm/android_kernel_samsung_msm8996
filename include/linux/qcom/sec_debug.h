@@ -540,8 +540,45 @@ extern void *kfree_hook(void *p, void *caller);
 #endif
 
 #ifdef CONFIG_USER_RESET_DEBUG
-extern int sec_debug_get_cp_crash_log(char *str);
+
+#ifdef CONFIG_USER_RESET_DEBUG_TEST
+extern void force_thermal_reset(void);
+extern void force_watchdog_bark(void);
 #endif
+
+#define SEC_DEBUG_EX_INFO_SIZE	(0x400)
+
+struct sec_debug_reset_ex_info {
+	u64 ktime;
+	struct task_struct *tsk;
+	char bug_buf[64];
+	char panic_buf[64];
+	u64 fault_addr[6];
+	char pc[64];
+	char lr[64];
+	char backtrace[700];
+}; // size SEC_DEBUG_EX_INFO_SIZE
+
+extern struct sec_debug_reset_ex_info *sec_debug_reset_ex_info;
+extern int sec_debug_get_cp_crash_log(char *str);
+extern void _sec_debug_store_backtrace(unsigned long where);
+extern void sec_debug_store_bug_string(const char *fmt, ...);
+
+static inline void sec_debug_store_pte(unsigned long addr, int idx)
+{
+	if (sec_debug_reset_ex_info) {
+		if(idx == 0)
+			memset(sec_debug_reset_ex_info->fault_addr, 0,
+				sizeof(sec_debug_reset_ex_info->fault_addr));
+
+		sec_debug_reset_ex_info->fault_addr[idx] = addr;
+	}
+}
+#else // CONFIG_USER_RESET_DEBUG
+static inline void sec_debug_store_pte(unsigned long addr, int idx)
+{
+}
+#endif // CONFIG_USER_RESET_DEBUG
 
 #ifdef CONFIG_TOUCHSCREEN_DUMP_MODE
 struct tsp_dump_callbacks {

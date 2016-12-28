@@ -56,6 +56,7 @@
 #include "isdbt_tuner_pdata.h"
 
 struct ISDBT_INIT_INFO_T *hInit;
+static struct wake_lock isdbt_wlock;
 
 int bbm_xtal_freq;
 unsigned int fc8300_xtal_freq;
@@ -653,6 +654,8 @@ int isdbt_open(struct inode *inode, struct file *filp)
 	fci_ringbuffer_init(&hOpen->RingBuffer, hOpen->buf, RING_BUFFER_SIZE);
 
 	filp->private_data = hOpen;
+	if (open_cnt == 1)
+		wake_lock(&isdbt_wlock);
 
 	return 0;
 }
@@ -751,10 +754,11 @@ int isdbt_release(struct inode *inode, struct file *filp)
 			/*kfree(hOpen->buf);*/
 
 			kfree(hOpen);
+			wake_unlock(&isdbt_wlock);
 		}
 
-		if(isdbt_pdata->regulator_is_enable)
-			isdbt_regulator_onoff(ISDBT_LDO_OFF);
+		if (driver_mode != ISDBT_POWEROFF)
+			isdbt_hw_deinit();
 	}
 
 	return 0;
@@ -943,6 +947,42 @@ long isdbt_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 #endif
 		}
 		break;
+
+	case IOCTL_ISDBT_TUNER_SELECT_2:
+		pr_err("[FC8300] IOCTL_ISDBT_TUNER_SELECT_2\n");
+		err = copy_from_user((void *)&info, (void *)arg, size);
+		bbm_com_byte_write(hInit, DIV_BROADCAST, BBM_BUF_ENABLE, 0x00);
+		if (((u32)info.buff[1] == ISDBTMM_13SEG) || ((u32)info.buff[1] == ISDBT_13SEG)) {
+#ifdef SEC_ENABLE_13SEG_BOOST
+			pr_info("[FC8300] enable boost!\n");
+			pm_qos_add_request(&fc8300_cpu_handle, PM_QOS_CLUSTER0_FREQ_MIN, FULLSEG_MIN_FREQ);
+#endif
+			g_pkt_length = TS0_32PKT_LENGTH;
+			bbm_com_word_write(hInit, DIV_BROADCAST, BBM_BUF_TS0_END, TS0_32PKT_LENGTH - 1);
+			bbm_com_word_write(hInit, DIV_BROADCAST, BBM_BUF_TS0_THR, TS0_32PKT_LENGTH / 2 - 1);
+			bbm_com_byte_write(hInit, DIV_BROADCAST, BBM_LAYER_FILTER0, 0x00);
+			bbm_com_byte_write(hInit, DIV_BROADCAST, BBM_BID_FILTER_MODE, 0x00);
+			print_log(hInit, "[FC8300] TUNER THRESHOLD: %d\n", TS0_32PKT_LENGTH / 2 - 1);
+		}	else	{
+#ifdef SEC_ENABLE_13SEG_BOOST
+			if (pm_qos_request_active(&fc8300_cpu_handle)) {
+				pr_info("[FC8300] 1seg don't need boost. remove!!\n");
+				pm_qos_remove_request(&fc8300_cpu_handle);
+			}
+#endif
+			g_pkt_length = TS0_5PKT_LENGTH;
+			bbm_com_word_write(hInit, DIV_BROADCAST, BBM_BUF_TS0_END, TS0_5PKT_LENGTH - 1);
+			bbm_com_word_write(hInit, DIV_BROADCAST, BBM_BUF_TS0_THR, TS0_5PKT_LENGTH / 2 - 1);
+			bbm_com_byte_write(hInit, DIV_BROADCAST, BBM_LAYER_FILTER0, 0x01);
+			bbm_com_byte_write(hInit, DIV_BROADCAST, BBM_BID_FILTER_MODE, 0x02);
+			print_log(hInit, "[FC8300] TUNER THRESHOLD: %d\n", TS0_5PKT_LENGTH / 2 - 1);
+		}
+		isdbt_pdata->type = (u32)info.buff[1];
+		bbm_com_byte_write(hInit, DIV_BROADCAST, BBM_BUF_ENABLE, 0x01);
+		bbm_com_reset(hInit, DIV_BROADCAST);
+		print_log(hInit, "[FC8300] IOCTL_ISDBT_TUNER_SELECT_2 %d\n", (u32)info.buff[1]);
+		break;
+		
 	case IOCTL_ISDBT_TUNER_SELECT:
 		pr_err("[FC8300] IOCTL_ISDBT_TUNER_SELECT\n");
 		err = copy_from_user((void *)&info, (void *)arg, size);
@@ -1393,6 +1433,8 @@ static int isdbt_probe(struct platform_device *pdev)
 		if (res)
 		pr_err("%s : failed to create device file in sysfs entries!\n", __func__);
 	}
+
+	wake_lock_init(&isdbt_wlock, WAKE_LOCK_SUSPEND, "isdbt_wlock");
 
 	return 0;
 }

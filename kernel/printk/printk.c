@@ -317,6 +317,8 @@ static phys_addr_t sec_log_buf_paddr;
 #define LAST_LOG_BUF_SHIFT 19
 static char *last_kmsg_buffer;
 static unsigned last_kmsg_size;
+extern char *reset_extra_log;
+extern unsigned reset_extra_size;
 #endif /* CONFIG_SEC_LOG_LAST_KMSG */
 #endif /* CONFIG_PRINTK_NOCACHE */
 #endif
@@ -1978,7 +1980,9 @@ static int __init sec_log_save_old(void)
 	    min((unsigned)(1 << LAST_LOG_BUF_SHIFT), *sec_log_idx_ptr);
 	    
 	last_kmsg_buffer = kmalloc(last_kmsg_size, GFP_KERNEL);
-
+	
+	reset_extra_log = last_kmsg_buffer;
+	reset_extra_size = last_kmsg_size;
 	if (last_kmsg_size && last_kmsg_buffer && sec_log_buf) {
 		unsigned int i;
 		for (i = 0; i < last_kmsg_size; i++)

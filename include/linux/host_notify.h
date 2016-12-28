@@ -6,6 +6,8 @@
  *
 */
 
+ /* usb notify layer v2.0 */
+
 #ifndef __LINUX_HOST_NOTIFY_H__
 #define __LINUX_HOST_NOTIFY_H__
 
@@ -60,4 +62,3 @@ static inline void host_notify_dev_unregister(struct host_notify_dev *ndev) {}
 #endif
 
 #endif /* __LINUX_HOST_NOTIFY_H__ */
-

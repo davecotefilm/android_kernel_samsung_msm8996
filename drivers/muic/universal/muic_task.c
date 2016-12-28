@@ -29,6 +29,11 @@
 #include <linux/delay.h>
 #include <linux/host_notify.h>
 
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+#include <linux/mfd/sm5703.h>
+#include <linux/mfd/sm5703-private.h>
+#endif
+
 #include <linux/muic/muic.h>
 #include <linux/mfd/muic_mfd.h>
 
@@ -73,6 +78,8 @@
 #define MUIC_INT_ATTACH_MASK	(0x1 << 0)
 #define MUIC_INT_OVP_EN_MASK	(0x1 << 5)
 
+#define MUIC_REG_CTRL_RESET_VALUE	(0x1F)
+
 #define MUIC_REG_CTRL	0x02
 #define MUIC_REG_INT1	0x03
 #define MUIC_REG_INT2	0x04
@@ -104,6 +111,69 @@ bool muic_is_online(void)
 {
 	return muic_online;
 }
+
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+extern void sm5703_muic_check_reset(struct i2c_client *i2c, void *muic_data );
+
+static int sm5703_muic_irq_handler(muic_data_t *pmuic, int irq)
+{
+	struct i2c_client *i2c = pmuic->i2c;
+	int intr1, intr2, ctrl;
+
+	pr_info("%s:%s irq(%d)\n", pmuic->chip_name, __func__, irq);
+
+	/* read and clear interrupt status bits */
+	intr1 = muic_i2c_read_byte(i2c, MUIC_REG_INT1);
+	intr2 = muic_i2c_read_byte(i2c, MUIC_REG_INT2);
+
+	if ((intr1 < 0) || (intr2 < 0)) {
+		pr_err("%s: err read interrupt status [1:0x%x, 2:0x%x]\n",
+				__func__, intr1, intr2);
+		return INT_REQ_DISCARD;
+	}
+
+	if (intr1 & MUIC_INT_ATTACH_MASK) {
+		int intr_tmp;
+		intr_tmp = muic_i2c_read_byte(i2c, MUIC_REG_INT1);
+		if (intr_tmp & 0x2) {
+			pr_info("%s:%s attach/detach interrupt occurred\n",
+				pmuic->chip_name, __func__);
+			intr1 &= 0xFE;
+		}
+		intr1 |= intr_tmp;
+	}
+
+	pr_info("%s:%s intr[1:0x%x, 2:0x%x]\n", pmuic->chip_name, __func__,
+			intr1, intr2);
+
+	ctrl = muic_i2c_read_byte(i2c, MUIC_REG_CTRL);
+
+	/* check for muic reset and recover for every interrupt occurred */
+	if ((intr1 & MUIC_INT_OVP_EN_MASK) ||
+		((ctrl == MUIC_REG_CTRL_RESET_VALUE) && (irq != -1))) {
+		if (ctrl == MUIC_REG_CTRL_RESET_VALUE) {
+			/* CONTROL register is reset to 1F */
+			muic_print_reg_log();
+			muic_print_reg_dump(pmuic);
+			pr_err("%s: err muic could have been reseted. Initilize!!\n",
+				__func__);
+			muic_reg_init(pmuic);
+			muic_print_reg_dump(pmuic);
+
+			/* MUIC Interrupt On */
+			set_int_mask(pmuic, false);
+		}
+
+		if ((intr1 & MUIC_INT_ATTACH_MASK) == 0)
+			return INT_REQ_DISCARD;
+	}
+
+	pmuic->intr.intr1 = intr1;
+	pmuic->intr.intr2 = intr2;
+
+	return INT_REQ_DONE;
+}
+#else
 static int muic_irq_handler(muic_data_t *pmuic, int irq)
 {
 	struct i2c_client *i2c = pmuic->i2c;
@@ -166,6 +236,7 @@ static int muic_irq_handler(muic_data_t *pmuic, int irq)
 
 	return INT_REQ_DONE;
 }
+#endif
 
 enum max_intr_bits{
 	INTR1_ADC1K_MASK = (1<<3),
@@ -274,6 +345,7 @@ static irqreturn_t max77854_muic_irq_handler(muic_data_t *pmuic, int irq)
 
 	case MAX77854_MUIC_IRQ_INT2_DCDTMR:
 		pr_info("%s DCTTMR interrupt occured\n",__func__);
+		pmuic->is_dcdtmr_intr = true;
 		break;
 	default:
 		break;
@@ -295,8 +367,13 @@ static irqreturn_t muic_irq_thread(int irq, void *data)
 				muic_handle_vbus(pmuic);
 		}
 	} else{
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+		if (sm5703_muic_irq_handler(pmuic, irq) & INT_REQ_DONE)
+			muic_detect_dev(pmuic);
+#else
 		if (muic_irq_handler(pmuic, irq) & INT_REQ_DONE)
 			muic_detect_dev(pmuic);
+#endif    
 	}
 
 	mutex_unlock(&pmuic->muic_mutex);
@@ -309,6 +386,10 @@ static void muic_init_detect(muic_data_t *pmuic)
 	pr_info("%s:%s\n", pmuic->chip_name, __func__);
 
 	pmuic->is_muic_ready = true;
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+	/* MUIC Interrupt On */
+	set_int_mask(pmuic, false);
+#endif    
 	muic_irq_thread(-1, pmuic);
 }
 
@@ -327,6 +408,10 @@ static int muic_irq_init(muic_data_t *pmuic)
 
 	if(!strcmp(pmuic->chip_name,"max,max77854")) {
 		int irq_adc1k, irq_adcerr, irq_adc, irq_chgtyp, irq_vbvolt;
+#if defined(CONFIG_MUIC_SUPPORT_CCIC)
+		/* type C needs checking dcd tmr interrupt */
+		int irq_dcdtmr;
+#endif
 
 		irq_adc1k = pdata->irq_gpio + MAX77854_MUIC_IRQ_INT1_ADC1K;
 		printk(" %s requesting irq no = %d\n",__func__,irq_adc1k);
@@ -354,14 +439,91 @@ static int muic_irq_init(muic_data_t *pmuic)
 		ret = request_threaded_irq(irq_vbvolt, NULL,
                         muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
                         "muic-irq", pmuic);
+#if defined(CONFIG_MUIC_SUPPORT_CCIC)
+		irq_dcdtmr = pdata->irq_gpio + MAX77854_MUIC_IRQ_INT2_DCDTMR;
+		printk(" %s requesting irq no = %d\n",__func__,irq_dcdtmr);
+		ret = request_threaded_irq(irq_dcdtmr, NULL,
+                        muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+                        "muic-irq", pmuic);
+#endif
 
 		pmuic->irqs.irq_adc1k = irq_adc1k;
 		pmuic->irqs.irq_adcerr = irq_adcerr;
 		pmuic->irqs.irq_adc = irq_adc;
 		pmuic->irqs.irq_chgtyp = irq_chgtyp;
 		pmuic->irqs.irq_vbvolt = irq_vbvolt;
+#if defined(CONFIG_MUIC_SUPPORT_CCIC)
+		pmuic->irqs.irq_dcdtmr = irq_dcdtmr;
+#endif
 
 	}
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+	else if (!strcmp(pmuic->chip_name,"sm,sm5703")) {
+		int irq_int1_attach, irq_int1_detach;
+		int irq_int2_vbusdet_on, irq_int2_rid_charger, irq_int2_mhl; 
+		int irq_int2_adc_chg, irq_int2_rev_acce, irq_int2_vbus_off;
+
+		/* SM5703 MUIC INT1 */
+		irq_int1_attach = pdata->irq_gpio + SM5703_MUIC_IRQ_INT1_ATTACH;
+		printk(" %s requesting irq no(irq_int1_attach) = %d\n",__func__,irq_int1_attach);
+		ret = request_threaded_irq(irq_int1_attach, NULL,
+						muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+						"muic-irq", pmuic);
+
+		irq_int1_detach = pdata->irq_gpio + SM5703_MUIC_IRQ_INT1_DETACH;
+		printk(" %s requesting irq no(irq_int1_detach) = %d\n",__func__,irq_int1_detach);
+		ret = request_threaded_irq(irq_int1_detach, NULL,
+						muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+						"muic-irq", pmuic);
+
+		/* SM5703 MUIC INT2 */
+		irq_int2_vbusdet_on = pdata->irq_gpio + SM5703_MUIC_IRQ_INT2_VBUSDET_ON;
+		printk(" %s requesting irq no(irq_int2_vbusdet_on) = %d\n",__func__,irq_int2_vbusdet_on);
+		ret = request_threaded_irq(irq_int2_vbusdet_on, NULL,
+						muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+						"muic-irq", pmuic);
+
+		irq_int2_rid_charger = pdata->irq_gpio + SM5703_MUIC_IRQ_INT2_RID_CHARGER;
+		printk(" %s requesting irq no(irq_int2_rid_charger) = %d\n",__func__,irq_int2_rid_charger);
+		ret = request_threaded_irq(irq_int2_rid_charger, NULL,
+						muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+						"muic-irq", pmuic);
+
+		irq_int2_mhl = pdata->irq_gpio + SM5703_MUIC_IRQ_INT2_MHL;
+		printk(" %s requesting irq no(irq_int2_mhl) = %d\n",__func__,irq_int2_mhl);
+		ret = request_threaded_irq(irq_int2_mhl, NULL,
+						muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+						"muic-irq", pmuic);
+
+		irq_int2_adc_chg = pdata->irq_gpio + SM5703_MUIC_IRQ_INT2_ADC_CHG;
+		printk(" %s requesting irq no(irq_int2_adc_chg) = %d\n",__func__,irq_int2_adc_chg);
+		ret = request_threaded_irq(irq_int2_adc_chg, NULL,
+						muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+						"muic-irq", pmuic);
+
+		irq_int2_rev_acce = pdata->irq_gpio + SM5703_MUIC_IRQ_INT2_REV_ACCE;
+		printk(" %s requesting irq no(irq_int2_rev_acce) = %d\n",__func__,irq_int2_rev_acce);
+		ret = request_threaded_irq(irq_int2_rev_acce, NULL,
+						muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+						"muic-irq", pmuic);
+
+		irq_int2_vbus_off = pdata->irq_gpio + SM5703_MUIC_IRQ_INT2_VBUS_OFF;
+		printk(" %s requesting irq no(irq_int2_vbus_off) = %d\n",__func__,irq_int2_vbus_off);
+		ret = request_threaded_irq(irq_int2_vbus_off, NULL,
+						muic_irq_thread, (IRQF_TRIGGER_FALLING | IRQF_ONESHOT),
+						"muic-irq", pmuic);
+
+		pmuic->irqs.irq_int1_attach = irq_int1_attach;
+		pmuic->irqs.irq_int1_detach = irq_int1_detach;
+
+		pmuic->irqs.irq_int2_vbusdet_on  = irq_int2_vbusdet_on;
+		pmuic->irqs.irq_int2_rid_charger = irq_int2_rid_charger;
+		pmuic->irqs.irq_int2_mhl         = irq_int2_mhl;
+		pmuic->irqs.irq_int2_adc_chg     = irq_int2_adc_chg;
+		pmuic->irqs.irq_int2_rev_acce    = irq_int2_rev_acce;
+		pmuic->irqs.irq_int2_vbus_off    = irq_int2_vbus_off;
+	}
+#endif   
 	else
 		ret = request_threaded_irq(pdata->irq_gpio, NULL,
 				muic_irq_thread,
@@ -394,18 +556,53 @@ static void muic_free_irqs(muic_data_t *pmuic)
 	FREE_IRQ(pmuic->irqs.irq_adc, pmuic, "muic-adc");
 	FREE_IRQ(pmuic->irqs.irq_adcerr, pmuic, "muic-adcerr");
 	FREE_IRQ(pmuic->irqs.irq_adc1k, pmuic, "muic-adc1k");
+#if defined(CONFIG_MUIC_SUPPORT_CCIC)
+	FREE_IRQ(pmuic->irqs.irq_dcdtmr, pmuic, "muic-dcdtmr");
+#endif
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+	FREE_IRQ(pmuic->irqs.irq_int1_attach, pmuic, "muic-int1_attach");
+	FREE_IRQ(pmuic->irqs.irq_int1_detach, pmuic, "muic-int1_detach");
+	FREE_IRQ(pmuic->irqs.irq_int2_vbusdet_on, pmuic, "muic-int2_vbusdet_on");
+	FREE_IRQ(pmuic->irqs.irq_int2_rid_charger, pmuic, "muic-int2_rid_charger");
+	FREE_IRQ(pmuic->irqs.irq_int2_mhl, pmuic, "muic-int2_mhl");
+	FREE_IRQ(pmuic->irqs.irq_int2_adc_chg, pmuic, "muic-int2_adc_chg");
+	FREE_IRQ(pmuic->irqs.irq_int2_rev_acce, pmuic, "muic-int2_rev_acce");
+	FREE_IRQ(pmuic->irqs.irq_int2_vbus_off, pmuic, "muic-int2_vbus_off");
+#endif    
 }
+
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+static ssize_t mic_adc_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int value = 0;
+
+	return snprintf(buf, 10, "%d\n", value);
+}
+
+static DEVICE_ATTR(mic_adc, 0444 , mic_adc_show, NULL);
+#endif
 
 static int muic_probe(struct platform_device *pdev)
 {
-	struct muic_mfd_dev *pmfd = dev_get_drvdata(pdev->dev.parent);
-	struct muic_mfd_platform_data *mfd_pdata = dev_get_platdata(pmfd->dev);
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+    	struct sm5703_dev *pmfd = dev_get_drvdata(pdev->dev.parent);
+    	struct sm5703_platform_data *mfd_pdata = dev_get_platdata(pmfd->dev);
+#else
+    	struct muic_mfd_dev *pmfd = dev_get_drvdata(pdev->dev.parent);
+    	struct muic_mfd_platform_data *mfd_pdata = dev_get_platdata(pmfd->dev);
+#endif
 	struct muic_platform_data *pdata = &muic_pdata;
 	muic_data_t *pmuic;
 	struct regmap_desc *pdesc = NULL;
 	struct regmap_ops *pops = NULL;
 	int ret = 0;
 
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+	struct input_dev *input;
+	struct class *audio;
+	struct device *earjack;
+#endif
 	pr_info("%s:%s\n", MUIC_DEV_NAME, __func__);
 
 	pmuic = kzalloc(sizeof(muic_data_t), GFP_KERNEL);
@@ -415,16 +612,31 @@ static int muic_probe(struct platform_device *pdev)
 		goto err_return;
 	}
 
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+	input = input_allocate_device();
+	if (!input) {
+		pr_err("%s: failed to allocate input\n", __func__);
+		ret = -ENOMEM;
+		goto err_return;
+	}
+#endif
 
 #if defined(CONFIG_OF)
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+	ret = of_muic_dt(pmfd->muic, pdata, pmuic);
+#else
 	ret = of_muic_dt(pmfd->i2c, pdata, pmuic);
+#endif
 	if (ret < 0) {
 		pr_err("%s:%s Failed to get device of_node \n",
 				MUIC_DEV_NAME, __func__);
 		goto err_io;
 	}
-
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+	of_update_supported_list(pmfd->muic, pdata);
+#else
 	of_update_supported_list(pmfd->i2c, pdata);
+#endif
 	vps_show_table();
 
 #endif /* CONFIG_OF */
@@ -439,18 +651,53 @@ static int muic_probe(struct platform_device *pdev)
 	pmuic->pdata = pdata;
 
 	pdata->irq_gpio = mfd_pdata->irq_base;
-	pr_info("%s:  muic irq_gpio = %d\n", __func__, pdata->irq_gpio);
-	pr_info("%s:  muic i2c client %s at 0x%02x\n", __func__, pmfd->muic->name, pmfd->muic->addr);
+	pr_info("%s: muic irq_gpio = %d\n", __func__, pdata->irq_gpio);
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+	pr_info("%s: muic i2c client %s at 0x%02x\n", __func__, pmfd->muic->name, pmfd->muic->addr);
+#else
+	pr_info("%s: muic i2c client %s at 0x%02x\n", __func__, pmfd->muic->name, pmfd->muic->addr);
 	pr_info("%s: mfd i2c client %s at 0x%02x\n", __func__, pmfd->i2c->name, pmfd->i2c->addr);
 	pr_info("%s: fuel i2c client %s at 0x%02x\n", __func__, pmfd->fuel->name, pmfd->fuel->addr);
 	pr_info("%s: chg  i2c client %s at 0x%02x\n", __func__, pmfd->chg->name, pmfd->chg->addr);
+#endif
 	pmuic->i2c = pmfd->muic;
 
 	pmuic->is_factory_start = false;
 	pmuic->is_otg_test = false;
 	pmuic->attached_dev = ATTACHED_DEV_UNKNOWN_MUIC;
 	pmuic->is_gamepad = false;
+	pmuic->is_dcdtmr_intr = false;
 
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+	pmuic->is_earkeypressed = false;
+	pmuic->old_keycode = 0;
+
+	/* input */
+	pmuic->input = input;
+	input->name = pdev->name; 
+	input->phys = "deskdock-key/input0"; 
+	input->dev.parent = &pdev->dev; 
+
+	input->id.bustype = BUS_HOST; 
+	input->id.vendor = 0x0001; 
+	input->id.product = 0x0001; 
+	input->id.version = 0x0001; 
+
+	/* Enable auto repeat feature of Linux input subsystem */ 
+	__set_bit(EV_REP, input->evbit); 
+
+	pr_info("%s, input->name:%s\n", __func__, input->name); 
+
+	input_set_capability(input, EV_KEY, KEY_MEDIA); 
+	input_set_capability(input, EV_KEY, KEY_VOLUMEUP); 
+	input_set_capability(input, EV_KEY, KEY_VOLUMEDOWN); 
+
+	ret = input_register_device(input); 
+	if (ret) { 
+		pr_err("%s: Unable to register input device, " 
+				"error: %d\n", __func__, ret); 
+	}
+#endif
 	if(!strcmp(pmuic->chip_name,"max,max77854"))
 		pmuic->vps_table = VPS_TYPE_TABLE;
 	else
@@ -465,7 +712,9 @@ static int muic_probe(struct platform_device *pdev)
 		} else
 			pr_info("%s: gpio_uart_sel is not supported.\n", __func__);
 	}
-
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+	pmuic->pdata->switch_sel=0xB;
+#endif
 	if (pmuic->pdata->init_gpio_cb) {
 		ret = pmuic->pdata->init_gpio_cb(get_switch_sel());
 		if (ret) {
@@ -504,6 +753,24 @@ static int muic_probe(struct platform_device *pdev)
 #if defined(CONFIG_MUIC_SUPPORT_CCIC)
 	pmuic->opmode = get_ccic_info() & 0x0F;
 #endif
+#if defined(CONFIG_MUIC_SUPPORT_EARJACK)
+        audio = class_create(THIS_MODULE, "audio");
+        if (IS_ERR(audio)) {
+                pr_err("Failed to create class(audio)!\n");
+        }
+
+        earjack = device_create(audio, NULL, 0, NULL, "earjack");
+        if (IS_ERR(earjack)) {
+                pr_err("Failed to create device(earjack)!\n");
+        }
+	
+	/*add /sys/class/audio/earjack/mic_adc to pass SMD keyshort test*/
+	ret = device_create_file(earjack, &dev_attr_mic_adc);
+	if (ret)
+	pr_err("Failed to create device file in sysfs entries (mic_adc)!\n");
+		
+        dev_set_drvdata(earjack, pmuic);
+#endif
 	/* set switch device's driver_data */
 	dev_set_drvdata(switch_device, pmuic);
 	dev_set_drvdata(&pdev->dev, pmuic);
@@ -539,8 +806,10 @@ static int muic_probe(struct platform_device *pdev)
 
 	coagent_update_ctx(pmuic);
 
-	muic_irq_init(pmuic);
-
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+    //pmfd->check_muic_reset = sm5703_muic_check_reset;
+    pmfd->muic_data = pmuic;
+#endif
 	/* initial cable detection */
 	muic_init_detect(pmuic);
 
@@ -576,6 +845,10 @@ static int muic_probe(struct platform_device *pdev)
   	muic_dump = ipc_log_context_create(5, "muic_dump", 0); 
 #endif 
 
+	muic_irq_init(pmuic);
+#if defined(CONFIG_MUIC_HV)
+	hv_irq_init(pmuic->phv);
+#endif
 	return 0;
 
 fail:

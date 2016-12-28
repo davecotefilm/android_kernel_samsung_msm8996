@@ -119,6 +119,10 @@ char *companion_fw_name[] = {
 #define	CRC_DATA_HIGH         0x6C0E
 #define	CRC_FINISH            0x6C14
 
+#define GPIO_LEVEL_LOW        0
+#define GPIO_LEVEL_HIGH       1
+#define GPIO_COMP_RSTN        91
+
 enum companion_state_t {
 	COMP_POWER_DOWN,
 	COMP_POWER_UP,

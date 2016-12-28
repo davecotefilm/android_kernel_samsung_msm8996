@@ -35,11 +35,18 @@ enum {
 	SENSOR_VIPER,
 	SENSOR_RAPTOR,
 	SENSOR_EGIS,
+	SENSOR_VIPER_WOG,
 };
 
-#define SENSOR_STATUS_SIZE 5
-static char sensor_status[SENSOR_STATUS_SIZE][8] ={"unknown", "failed",
-	"viper", "raptor", "egis"};
+#define SENSOR_STATUS_SIZE 6
+static char sensor_status[SENSOR_STATUS_SIZE][10] ={"unknown", "failed",
+	"viper", "raptor", "egis", "viper_wog"};
+
+/* For Finger Detect Mode */
+enum {
+	DETECT_NORMAL = 0,
+	DETECT_ADM,			// Always on Detect Mode
+};
 
 #ifdef CONFIG_SENSORS_FINGERPRINT_DUALIZATION
 extern int FP_CHECK; /* extern variable */

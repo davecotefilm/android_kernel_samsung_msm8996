@@ -28,6 +28,7 @@
 #if defined(CONFIG_SENSOR_RETENTION)
 extern bool sensor_retention_mode;
 #endif
+extern bool retention_mode_pwr;
 
 void msm_camera_io_w(u32 data, void __iomem *addr)
 {
@@ -682,24 +683,37 @@ int msm_camera_config_single_vreg(struct device *dev,
 			CDBG("%s: voltage min=%d, max=%d\n",
 				__func__, cam_vreg->min_voltage,
 				cam_vreg->max_voltage);
-			rc = regulator_set_voltage(
-				*reg_ptr, cam_vreg->min_voltage,
-				cam_vreg->max_voltage);
-			if (rc < 0) {
-				pr_err("%s: %s set voltage failed\n",
-					__func__, vreg_name);
-				goto vreg_set_voltage_fail;
-			}
-			if (cam_vreg->op_mode >= 0) {
-				rc = regulator_set_optimum_mode(*reg_ptr,
-					cam_vreg->op_mode);
+#if 1
+			rc = regulator_get_voltage(
+				*reg_ptr);
+			CDBG("%s:%s get voltage %d\n",
+				__func__, vreg_name, rc);
+#endif
+#if 1
+			if (retention_mode_pwr == 0
+				|| !strcmp(vreg_name, "s2mpb02-ldo11")) {
+				CDBG("%s:%s set voltage\n", __func__, vreg_name);
+
+				rc = regulator_set_voltage(
+					*reg_ptr, cam_vreg->min_voltage,
+					cam_vreg->max_voltage);
 				if (rc < 0) {
-					pr_err(
-					"%s: %s set optimum mode failed\n",
-					__func__, vreg_name);
-					goto vreg_set_opt_mode_fail;
+					pr_err("%s: %s set voltage failed\n",
+						__func__, vreg_name);
+					goto vreg_set_voltage_fail;
+				}
+				if (cam_vreg->op_mode >= 0) {
+					rc = regulator_set_optimum_mode(*reg_ptr,
+						cam_vreg->op_mode);
+					if (rc < 0) {
+						pr_err(
+						"%s: %s set optimum mode failed\n",
+						__func__, vreg_name);
+						goto vreg_set_opt_mode_fail;
+					}
 				}
 			}
+#endif
 		}
 		rc = regulator_enable(*reg_ptr);
 		if (rc < 0) {
@@ -712,12 +726,14 @@ int msm_camera_config_single_vreg(struct device *dev,
 		if (*reg_ptr) {
 			CDBG("%s disable %s\n", __func__, vreg_name);
 			regulator_disable(*reg_ptr);
+#if 0
 			if (regulator_count_voltages(*reg_ptr) > 0) {
 				if (cam_vreg->op_mode >= 0)
 					regulator_set_optimum_mode(*reg_ptr, 0);
 				regulator_set_voltage(
 					*reg_ptr, 0, cam_vreg->max_voltage);
 			}
+#endif
 			regulator_put(*reg_ptr);
 			*reg_ptr = NULL;
 		} else {
@@ -729,7 +745,6 @@ int msm_camera_config_single_vreg(struct device *dev,
 vreg_unconfig:
 if (regulator_count_voltages(*reg_ptr) > 0)
 	regulator_set_optimum_mode(*reg_ptr, 0);
-
 vreg_set_opt_mode_fail:
 if (regulator_count_voltages(*reg_ptr) > 0)
 	regulator_set_voltage(*reg_ptr, 0, cam_vreg->max_voltage);
@@ -737,7 +752,6 @@ if (regulator_count_voltages(*reg_ptr) > 0)
 vreg_set_voltage_fail:
 	regulator_put(*reg_ptr);
 	*reg_ptr = NULL;
-
 vreg_get_fail:
 	return -ENODEV;
 }

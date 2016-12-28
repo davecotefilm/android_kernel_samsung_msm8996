@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -52,6 +52,8 @@ struct panel_id {
 #define WRITEBACK_PANEL		10	/* Wifi display */
 #define LVDS_PANEL		11	/* LVDS */
 #define EDP_PANEL		12	/* LVDS */
+
+#define DSC_PPS_LEN		128
 
 static inline const char *mdss_panel2str(u32 panel)
 {
@@ -256,7 +258,8 @@ enum mdss_intf_events {
 	MDSS_SAMSUNG_EVENT_START,
 	MDSS_SAMSUNG_EVENT_FRAME_UPDATE,
 	MDSS_SAMSUNG_EVENT_FB_EVENT_CALLBACK,
-	MDSS_SAMSUNG_EVENT_PANEL_2C_CMD,
+	MDSS_SAMSUNG_EVENT_PANEL_ESD_RECOVERY,
+	MDSS_SAMSUNG_EVENT_MULTI_RESOLUTION,
 	MDSS_SAMSUNG_EVENT_MAX,
 #endif
 };
@@ -437,10 +440,34 @@ enum {
 };
 
 struct dsc_desc {
+	/*
+	 * Following parameters can change per frame if partial update is on
+	 */
+	int pic_height;
+	int pic_width;
 	int initial_lines;
+
+	/*
+	 * Following parameters are used for DSI and not for MDP. They can
+	 * change per frame if partial update is enabled.
+	 */
+	int pkt_per_line;
+	int bytes_in_slice;
+	int bytes_per_pkt;
+	int eol_byte_num;
+	int pclk_per_line;	/* width */
+
+	/*
+	 * Following parameters only changes when slice dimensions are changed.
+	 */
+	int full_frame_slices; /* denotes number of slice per intf */
+	int slice_height;
+	int slice_width;
+	int chunk_size;
+
 	int slice_last_group_size;
-	int bpp;	/* target bit per pixel */
-	int bpc;	/* bit per component */
+	int bpp;	/* target bits per pixel */
+	int bpc;	/* uncompressed bits per component */
 	int line_buf_depth;
 	bool config_by_manufacture_cmd;
 	bool block_pred_enable;
@@ -449,19 +476,6 @@ struct dsc_desc {
 	int convert_rgb;
 	int input_10_bits;
 	int slice_per_pkt;
-
-	int pic_height;
-	int pic_width;
-	int slice_height;
-	int slice_width;
-	int chunk_size;
-	int full_frame_slices; /* denotes number of slice in full frame */
-
-	int pkt_per_line;
-	int bytes_in_slice;
-	int bytes_per_pkt;
-	int eol_byte_num;
-	int pclk_per_line;	/* width */
 
 	int initial_dec_delay;
 	int initial_xmit_delay;
@@ -529,6 +543,15 @@ struct mdss_mdp_pp_tear_check {
 	u32 refx100;
 };
 
+struct mdss_panel_roi_alignment {
+	u32 xstart_pix_align;
+	u32 width_pix_align;
+	u32 ystart_pix_align;
+	u32 height_pix_align;
+	u32 min_width;
+	u32 min_height;
+};
+
 struct mdss_panel_info {
 	u32 xres;
 	u32 yres;
@@ -576,15 +599,10 @@ struct mdss_panel_info {
 	int panel_max_fps;
 	int panel_max_vtotal;
 	u32 mode_gpio_state;
-	u32 xstart_pix_align;
-	u32 width_pix_align;
-	u32 ystart_pix_align;
-	u32 height_pix_align;
-	u32 min_width;
-	u32 min_height;
 	u32 min_fps;
 	u32 max_fps;
 	u32 prg_fet;
+	struct mdss_panel_roi_alignment roi_alignment;
 
 	u32 cont_splash_enabled;
 	bool esd_rdy;
@@ -640,6 +658,12 @@ struct mdss_panel_info {
 	u8 dsc_enc_total; /* max 2 */
 	struct dsc_desc dsc;
 
+	/*
+	 * To determine, if DSC panel requires the pps to be sent
+	 * before or after the switch, during dynamic resolution switching
+	 */
+	bool send_pps_before_switch;
+
 	struct lcd_panel_info lcdc;
 	struct fbc_panel_info fbc;
 	struct mipi_panel_info mipi;
@@ -690,6 +714,7 @@ struct mdss_panel_timing {
 	u32 compression_mode;
 
 	struct mdss_mdp_pp_tear_check te;
+	struct mdss_panel_roi_alignment roi_alignment;
 };
 
 struct mdss_panel_data {
@@ -715,7 +740,9 @@ struct mdss_panel_data {
 	struct mdss_panel_timing *current_timing;
 	bool active;
 
-	struct device_node *cfg_np; /* NULL if config node is not present */
+	/* To store dsc cfg name passed by bootloader */
+	char dsc_cfg_np_name[MDSS_MAX_PANEL_LEN];
+
 	struct mdss_panel_data *next;
 #if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
 	void *panel_private;
@@ -926,6 +953,55 @@ int mdss_rect_cmp(struct mdss_rect *rect1, struct mdss_rect *rect2);
  */
 void mdss_panel_override_te_params(struct mdss_panel_info *pinfo);
 
+/**
+ * mdss_panel_dsc_parameters_calc: calculate DSC parameters
+ * @dsc: pointer to DSC structure associated with panel_info
+ */
+void mdss_panel_dsc_parameters_calc(struct dsc_desc *dsc);
+
+/**
+ * mdss_panel_dsc_update_pic_dim: update DSC structure with picture dimension
+ * @dsc: pointer to DSC structure associated with panel_info
+ * @pic_width: Picture width
+ * @pic_height: Picture height
+ */
+void mdss_panel_dsc_update_pic_dim(struct dsc_desc *dsc,
+	int pic_width, int pic_height);
+
+/**
+ * mdss_panel_dsc_initial_line_calc: update DSC initial line buffering
+ * @dsc: pointer to DSC structure associated with panel_info
+ * @enc_ip_width: uncompressed input width for DSC enc represented by @dsc
+ *              i.e.
+ *                 * 720 for full frame single_display_dual_lm: 1440x2560
+ *                 * 1080 for full frame dual_display_dual_lm: 2160x3840
+ *                 * 360 for partial frame single_display_dual_lm: 360x2560
+ */
+void mdss_panel_dsc_initial_line_calc(struct dsc_desc *dsc, int enc_ip_width);
+
+/**
+ * mdss_panel_dsc_pclk_param_calc: calculate DSC params related to DSI
+ * @dsc: pointer to DSC structure associated with panel_info
+ * @intf_width: Uncompressed width per interface
+ *              i.e.
+ *                 * 1440 for full frame single_display_dual_lm: 1440x2560
+ *                 * 1080 for full frame dual_display_dual_lm: 2160x3840
+ *                 * 720 for partial frame single_display_dual_lm: 720x2560
+ */
+void mdss_panel_dsc_pclk_param_calc(struct dsc_desc *dsc, int intf_width);
+
+/**
+ * mdss_panel_dsc_prepare_pps_buf - prepares Picture Parameter Set to be sent to panel
+ * @dsc: pointer to DSC structure associated with panel_info
+ * @buf: buffer that holds PPS
+ * @pps_id: pps_identifier
+ * @major: major version of the DSC encoder
+ * @minot: minor version of the DSC encoder
+ *
+ * returns length of the PPS buffer.
+ */
+int mdss_panel_dsc_prepare_pps_buf(struct dsc_desc *dsc, char *buf,
+	int pps_id, int major, int minor);
 #ifdef CONFIG_FB_MSM_MDSS
 int mdss_panel_debugfs_init(struct mdss_panel_info *panel_info,
 		char const *panel_name);

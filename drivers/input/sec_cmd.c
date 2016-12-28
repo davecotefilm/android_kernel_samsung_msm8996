@@ -260,6 +260,7 @@ static ssize_t sec_cmd_store(struct device *dev, struct device_attribute *devatt
 {
 	struct sec_cmd_data *data = dev_get_drvdata(dev);
 	struct command cmd = {{0}};
+	int queue_size;
 
 	if (!data) {
 		pr_err("%s: No platform data found\n", __func__);
@@ -274,12 +275,22 @@ static ssize_t sec_cmd_store(struct device *dev, struct device_attribute *devatt
 	strncpy(cmd.cmd, buf, count);
 
 	mutex_lock(&data->fifo_lock);
-	if (kfifo_avail(&data->cmd_queue)) {
+	queue_size = (kfifo_len(&data->cmd_queue) / sizeof(struct command));
+
+	if (kfifo_avail(&data->cmd_queue) && (queue_size < SEC_CMD_MAX_QUEUE)) {
 		kfifo_in(&data->cmd_queue, &cmd, sizeof(struct command));
 		pr_info("%s: push cmd: %s\n", __func__, cmd.cmd);
 	} else {
 		pr_err("%s: cmd_queue is full!!\n", __func__);
+
+		kfifo_reset(&data->cmd_queue);
+		pr_err("%s: cmd_queue is reset!!\n", __func__);
 		mutex_unlock(&data->fifo_lock);
+
+		mutex_lock(&data->cmd_lock);
+		data->cmd_is_running = false;
+		mutex_unlock(&data->cmd_lock);
+
 		return -ENOSPC;
 	}
 

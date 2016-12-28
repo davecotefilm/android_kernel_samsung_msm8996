@@ -4324,7 +4324,7 @@ static int voice_send_netid_timing_cmd(struct voice_data *v)
 		goto fail;
 	}
 	/* Set network ID. */
-	pr_debug("Setting network ID\n");
+	pr_info("Setting network ID %x\n", common.mvs_info.network_type);
 
 	mvm_set_network.hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
 						APR_HDR_LEN(APR_HDR_SIZE),
@@ -4335,7 +4335,7 @@ static int voice_send_netid_timing_cmd(struct voice_data *v)
 				voice_get_idx_for_session(v->session_id);
 	mvm_set_network.hdr.dest_port = mvm_handle;
 	mvm_set_network.hdr.token = 0;
-	mvm_set_network.hdr.opcode = VSS_ICOMMON_CMD_SET_NETWORK;
+	mvm_set_network.hdr.opcode = VSS_IMVM_CMD_SET_CAL_NETWORK;
 	mvm_set_network.network.network_id = common.mvs_info.network_type;
 
 	v->mvm_state = CMD_STATUS_FAIL;
@@ -5461,9 +5461,6 @@ static int voice_cvs_stop_playback(struct voice_data *v)
 				v->async_err));
 			ret = adsp_err_get_lnx_err_code(
 					v->async_err);
-			v->music_info.playing = 0;
-			v->music_info.force = 0;
-
 			goto fail;
 		}
 
@@ -6370,6 +6367,110 @@ void voc_config_vocoder(uint32_t media_type,
 }
 
 #ifdef CONFIG_SEC_VOC_SOLUTION
+static int voice_send_dha_data(struct voice_data *v, uint16_t mode, uint16_t select, int16_t *parameters)
+{
+	struct cvp_dha_parm_send_cmd cvp_dha_param_cmd;
+	int ret = 0;
+	void *apr_cvp;
+	u16 cvp_handle;
+
+	if (v == NULL) {
+		pr_err("%s: v is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	apr_cvp = common.apr_q6_cvp;
+	if (!apr_cvp) {
+		pr_err("%s: apr_cvp is NULL.\n", __func__);
+		return -EINVAL;
+	}
+
+	cvp_handle = voice_get_cvp_handle(v);
+
+	/* fill in the header */
+	cvp_dha_param_cmd.hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
+				APR_HDR_LEN(APR_HDR_SIZE),
+				APR_PKT_VER);
+	cvp_dha_param_cmd.hdr.pkt_size = APR_PKT_SIZE(APR_HDR_SIZE,
+		sizeof(cvp_dha_param_cmd) - APR_HDR_SIZE);
+	cvp_dha_param_cmd.hdr.src_port =
+		voice_get_idx_for_session(v->session_id);
+	cvp_dha_param_cmd.hdr.dest_port = cvp_handle;
+	cvp_dha_param_cmd.hdr.token = 0;
+	cvp_dha_param_cmd.hdr.opcode = VOICE_CMD_SET_PARAM;
+	cvp_dha_param_cmd.mem_handle = 0;
+	cvp_dha_param_cmd.mem_address = 0;
+	cvp_dha_param_cmd.mem_size = 40;
+	cvp_dha_param_cmd.dha_send.module_id = VOICE_VOICEMODE_MODULE;
+	cvp_dha_param_cmd.dha_send.param_id = VOICE_DHA_PARAM;
+	cvp_dha_param_cmd.dha_send.param_size = 28;
+	cvp_dha_param_cmd.dha_send.reserved = 0;
+	cvp_dha_param_cmd.dha_send.eq_mode = mode;
+	cvp_dha_param_cmd.dha_send.select = select;
+
+	memcpy(cvp_dha_param_cmd.dha_send.param, parameters, sizeof(int16_t)*12);
+
+	pr_info("%s: send dha param, mode = %d, select=%d\n",
+		__func__,
+		cvp_dha_param_cmd.dha_send.eq_mode,
+		cvp_dha_param_cmd.dha_send.select);
+
+	v->cvp_state = CMD_STATUS_FAIL;
+	v->cvp_dha_state = 1;
+
+	ret = apr_send_pkt(apr_cvp, (uint32_t *) &cvp_dha_param_cmd);
+	if (ret < 0) {
+		pr_err("%s: Failed to send vpcm_dha_param_send_cmd\n",
+			__func__);
+		v->cvp_dha_state = 0;
+		return -EINVAL;
+	}
+
+	ret = wait_event_timeout(v->cvp_wait,
+				(v->cvp_state == CMD_STATUS_SUCCESS),
+				msecs_to_jiffies(TIMEOUT_MS));
+
+	v->cvp_dha_state = 0;
+	if (!ret) {
+		pr_err("%s: wait_event timeout\n", __func__);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int voice_sec_set_dha_data(uint16_t mode, uint16_t select, int16_t *parameters)
+{
+	struct voice_data *v = NULL;
+	int ret = 0;
+	struct voice_session_itr itr;
+
+	pr_debug("%s: Enter\n", __func__);
+
+	mutex_lock(&common.common_lock);
+	voice_itr_init(&itr, ALL_SESSION_VSID);
+	while (voice_itr_get_next_session(&itr, &v)) {
+		if (v != NULL) {
+			mutex_lock(&v->lock);
+			if (is_voc_state_active(v->voc_state) &&
+				(v->lch_mode != VOICE_LCH_START) &&
+				!v->disable_topology)
+				ret = voice_send_dha_data(v, mode, select, parameters);
+			mutex_unlock(&v->lock);
+		} else {
+			pr_err("%s: invalid session\n", __func__);
+			ret = -EINVAL;
+			break;
+		}
+	}
+	mutex_unlock(&common.common_lock);
+	pr_debug("%s: Exit, ret=%d\n", __func__, ret);
+
+	return ret;
+}
+
+EXPORT_SYMBOL(voice_sec_set_dha_data);
+
 static int voice_send_nbmode_cmd(struct voice_data *v, int enable)
 {
 	struct cvp_set_nbmode_enable_cmd cvp_nbmode_cmd;
@@ -6419,18 +6520,15 @@ static int voice_send_nbmode_cmd(struct voice_data *v, int enable)
 	if (ret < 0) {
 		pr_err("%s: Failed to send cvp_nbmode_cmd\n",
 			__func__);
-		return -EINVAL;
+		goto fail;
 	}
 
 	ret = wait_event_timeout(v->cvp_wait,
 				(v->cvp_state == CMD_STATUS_SUCCESS),
 				msecs_to_jiffies(TIMEOUT_MS));
-
-	v->cvp_nbmode_state = 0;
 	if (!ret) {
 		pr_err("%s: wait_event timeout\n", __func__);
-		v->cvp_nbmode_state = 0;
-		return -EINVAL;
+		goto fail;
 	}
 
 	if (v->async_err > 0) {
@@ -6439,10 +6537,46 @@ static int voice_send_nbmode_cmd(struct voice_data *v, int enable)
 				v->async_err));
 		ret = adsp_err_get_lnx_err_code(
 				v->async_err);
-		return ret;
+		goto fail;
 	}
+	v->cvp_nbmode_state = 0;
 	return 0;
+
+fail:
+	v->cvp_spkmode_state = 0;
+	return ret;
 }
+
+int voice_sec_set_nbmode(short enable)
+{
+	struct voice_data *v = NULL;
+	int ret = 0;
+	struct voice_session_itr itr;
+
+	pr_debug("%s: Enter\n", __func__);
+
+	mutex_lock(&common.common_lock);
+	voice_itr_init(&itr, ALL_SESSION_VSID);
+	while (voice_itr_get_next_session(&itr, &v)) {
+		if (v != NULL) {
+			mutex_lock(&v->lock);
+			if (is_voc_state_active(v->voc_state) &&
+				(v->lch_mode != VOICE_LCH_START) &&
+				!v->disable_topology)
+				ret = voice_send_nbmode_cmd(v, enable);
+			mutex_unlock(&v->lock);
+		} else {
+			pr_err("%s: invalid session\n", __func__);
+			ret = -EINVAL;
+			break;
+		}
+	}
+	mutex_unlock(&common.common_lock);
+	pr_debug("%s: Exit, ret=%d\n", __func__, ret);
+
+	return ret;
+}
+EXPORT_SYMBOL(voice_sec_set_nbmode);
 
 static int voice_send_spkmode_cmd(struct voice_data *v, int enable)
 {
@@ -6482,29 +6616,24 @@ static int voice_send_spkmode_cmd(struct voice_data *v, int enable)
 	cvp_spkmode_cmd.cvp_set_spkmode.enable = enable;
 	cvp_spkmode_cmd.cvp_set_spkmode.reserved_field = 0;
 
-	pr_info("%s(): eanble = %d\n",
-		__func__,
-		cvp_spkmode_cmd.cvp_set_spkmode.enable);
+	pr_info("%s(): Setting Voice Module enable = %d\n", __func__, cvp_spkmode_cmd.cvp_set_spkmode.enable);
 
-	v->cvp_state = CMD_STATUS_FAIL;
 	v->cvp_spkmode_state = 1;
+	v->cvp_state = CMD_STATUS_FAIL;
 	v->async_err = 0;
 	ret = apr_send_pkt(apr_cvp, (uint32_t *) &cvp_spkmode_cmd);
 	if (ret < 0) {
-		pr_err("%s: Failed to send cvp_spkmode_cmd\n",
-			__func__);
-		return -EINVAL;
+		pr_err("%s: Failed to send cvp_spkmode_cmd\n", __func__);
+		goto fail;
 	}
 
 	ret = wait_event_timeout(v->cvp_wait,
 				(v->cvp_state == CMD_STATUS_SUCCESS),
 				msecs_to_jiffies(TIMEOUT_MS));
 
-	v->cvp_spkmode_state = 0;
 	if (!ret) {
 		pr_err("%s: wait_event timeout\n", __func__);
-		v->cvp_spkmode_state = 0;
-		return -EINVAL;
+		goto fail;
 	}
 
 	if (v->async_err > 0) {
@@ -6513,41 +6642,77 @@ static int voice_send_spkmode_cmd(struct voice_data *v, int enable)
 				v->async_err));
 		ret = adsp_err_get_lnx_err_code(
 				v->async_err);
-		return ret;
+		goto fail;
 	}
+
+	cvp_spkmode_cmd.cvp_set_spkmode.module_id = VOICE_FVSAM_MODULE;
+
+	pr_info("Setting FVSAM Module enable = %d\n", cvp_spkmode_cmd.cvp_set_spkmode.enable);
+
+	v->cvp_state = CMD_STATUS_FAIL;
+	v->async_err = 0;
+	ret = apr_send_pkt(apr_cvp, (uint32_t *) &cvp_spkmode_cmd);
+	if (ret < 0) {
+		pr_err("%s: Failed to send cvp_spkmode_cmd\n", __func__);
+		goto fail;
+	}
+
+	ret = wait_event_timeout(v->cvp_wait,
+				(v->cvp_state == CMD_STATUS_SUCCESS),
+				msecs_to_jiffies(TIMEOUT_MS));
+
+	if (!ret) {
+		pr_err("%s: wait_event timeout\n", __func__);
+		goto fail;
+	}
+
+	if (v->async_err > 0) {
+		pr_err("%s: DSP returned error[%s]\n",
+				__func__, adsp_err_get_err_str(
+				v->async_err));
+		ret = adsp_err_get_lnx_err_code(
+				v->async_err);
+		goto fail;
+	}
+
+	cvp_spkmode_cmd.cvp_set_spkmode.module_id = VOICE_WISEVOICE_MODULE;
+
+	pr_info("Setting WiseVoice Module enable = %d\n", cvp_spkmode_cmd.cvp_set_spkmode.enable);
+
+	v->cvp_state = CMD_STATUS_FAIL;
+	v->async_err = 0;
+	ret = apr_send_pkt(apr_cvp, (uint32_t *) &cvp_spkmode_cmd);
+	if (ret < 0) {
+		pr_err("%s: Failed to send cvp_spkmode_cmd\n", __func__);
+		goto fail;
+	}
+
+	ret = wait_event_timeout(v->cvp_wait,
+				(v->cvp_state == CMD_STATUS_SUCCESS),
+				msecs_to_jiffies(TIMEOUT_MS));
+
+	if (!ret) {
+		pr_err("%s: wait_event timeout\n", __func__);
+
+		goto fail;
+	}
+
+	if (v->async_err > 0) {
+		pr_err("%s: DSP returned error[%s]\n",
+				__func__, adsp_err_get_err_str(
+				v->async_err));
+		ret = adsp_err_get_lnx_err_code(
+				v->async_err);
+		goto fail;
+	}
+
+	v->cvp_spkmode_state = 0;
 	return 0;
-}
 
-int voice_sec_set_nbmode(short enable)
-{
-	struct voice_data *v = NULL;
-	int ret = 0;
-	struct voice_session_itr itr;
-
-	pr_debug("%s: Enter\n", __func__);
-
-	mutex_lock(&common.common_lock);
-	voice_itr_init(&itr, ALL_SESSION_VSID);
-	while (voice_itr_get_next_session(&itr, &v)) {
-		if (v != NULL) {
-			mutex_lock(&v->lock);
-			if (is_voc_state_active(v->voc_state) &&
-				(v->lch_mode != VOICE_LCH_START) &&
-				!v->disable_topology)
-				ret = voice_send_nbmode_cmd(v, enable);
-			mutex_unlock(&v->lock);
-		} else {
-			pr_err("%s: invalid session\n", __func__);
-			ret = -EINVAL;
-			break;
-		}
-	}
-	mutex_unlock(&common.common_lock);
-	pr_debug("%s: Exit, ret=%d\n", __func__, ret);
-
+fail:
+	v->cvp_spkmode_state = 0;
 	return ret;
 }
-EXPORT_SYMBOL(voice_sec_set_nbmode);
 
 int voice_sec_set_spkmode(short enable)
 {
@@ -7213,6 +7378,13 @@ static int32_t qdsp_cvp_callback(struct apr_client_data *data, void *priv)
 				pr_debug("%s: VOICE_CMD_SET_PARAM\n", __func__);
 				rtac_make_voice_callback(RTAC_CVP, ptr,
 							data->payload_size);
+#ifdef CONFIG_SEC_VOC_SOLUTION
+				if (v->cvp_dha_state) {
+					v->cvp_state = CMD_STATUS_SUCCESS;
+					wake_up(&v->cvp_wait);
+				}
+#endif /* CONFIG_SEC_VOC_SOLUTION*/
+
 				break;
 			case VOICE_CMD_GET_PARAM:
 				pr_debug("%s: VOICE_CMD_GET_PARAM\n",

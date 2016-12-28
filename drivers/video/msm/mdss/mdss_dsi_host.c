@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1158,6 +1158,7 @@ static void mdss_dsi_mode_setup(struct mdss_panel_data *pdata)
 	if (pinfo->compression_mode == COMPRESSION_DSC)
 		dsc = &pinfo->dsc;
 
+	MDSS_XLOG(pinfo->compression_mode, dsc? dsc->pic_height:0xffff);
 	dst_bpp = pdata->panel_info.fbc.enabled ?
 		(pdata->panel_info.fbc.target_bpp) : (pinfo->bpp);
 
@@ -1238,6 +1239,7 @@ static void mdss_dsi_mode_setup(struct mdss_panel_data *pdata)
 					DTYPE_DCS_LWRITE;
 			stream_total = height << 16 | width;
 		}
+		MDSS_XLOG(dsc,pinfo->partial_update_enabled,mdss_dsi_is_panel_on(pdata),pinfo->roi.w,pinfo->roi.h,stream_ctrl,stream_total);
 
 		/* DSI_COMMAND_MODE_NULL_INSERTION_CTRL */
 		if ((ctrl_pdata->shared_data->hw_rev >= MDSS_DSI_HW_REV_104)
@@ -1264,6 +1266,7 @@ static void mdss_dsi_mode_setup(struct mdss_panel_data *pdata)
 		MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x64, stream_total);
 		MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x5C, stream_total);
 	}
+	MDSS_XLOG(MIPI_INP((ctrl_pdata->ctrl_base) + 0x5C),MIPI_INP((ctrl_pdata->ctrl_base) + 0x64));
 
 	if (dsc)	/* compressed */
 		mdss_dsi_dsc_config(ctrl_pdata, dsc);
@@ -2508,9 +2511,10 @@ int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp)
 			ctrl->mdss_util->iommu_ctrl(0);
 
 		(void)mdss_dsi_bus_bandwidth_vote(ctrl->shared_data, false);
-		mdss_dsi_clk_ctrl(ctrl, ctrl->dsi_clk_handle, MDSS_DSI_ALL_CLKS,
-			  MDSS_DSI_CLK_OFF);
 	}
+
+	mdss_dsi_clk_ctrl(ctrl, ctrl->dsi_clk_handle, MDSS_DSI_ALL_CLKS,
+			MDSS_DSI_CLK_OFF);
 
 need_lock:
 

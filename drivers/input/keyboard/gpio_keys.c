@@ -59,6 +59,10 @@ bool wakeup_by_key(void) {
 }
 EXPORT_SYMBOL(wakeup_by_key);
 
+#if defined(CONFIG_FB) && defined(CONFIG_SENSORS_VFS7XXX)
+extern void vfsspi_fp_homekey_ev(void);
+#endif
+
 struct device *sec_key;
 EXPORT_SYMBOL(sec_key);
 
@@ -384,6 +388,10 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 			input_event(input, type, button->code, button->value);
 	} else {
 		input_event(input, type, button->code, !!state);
+#if defined(CONFIG_FB) && defined(CONFIG_SENSORS_VFS7XXX)
+		if(button->code == KEY_HOMEPAGE && !!state == 1)
+			vfsspi_fp_homekey_ev();
+#endif
 	}
 	input_sync(input);
 
@@ -782,6 +790,12 @@ static ssize_t sysfs_hall_detect_show(struct device *dev,
 static DEVICE_ATTR(hall_detect, S_IRUGO, sysfs_hall_detect_show, NULL);
 #endif
 
+#ifdef CONFIG_KEYBOARD_MATRIX
+extern int check_short_key(void);
+extern int check_short_pkey(void);
+extern int get_vdkey_press(void);
+#endif
+
 static ssize_t sysfs_key_onoff_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -800,6 +814,11 @@ static ssize_t sysfs_key_onoff_show(struct device *dev,
 #if defined(CONFIG_SEC_PM)
 	/* Volume down button tied in with PMIC RESIN. */
 	if (state == 0 && (get_vdkey_press() > 0))
+		state = 1;
+#endif
+
+#ifdef CONFIG_KEYBOARD_MATRIX
+	if(check_short_key() || check_short_pkey() || get_vdkey_press())
 		state = 1;
 #endif
 
@@ -968,7 +987,9 @@ static int gpio_keys_probe(struct platform_device *pdev)
 	size_t size;
 	int i, error;
 	int wakeup = 0;
+#if defined(CONFIG_SENSORS_HALL)
 	int ret;
+#endif
 	struct pinctrl_state *set_state;
 
 	if (!pdata) {

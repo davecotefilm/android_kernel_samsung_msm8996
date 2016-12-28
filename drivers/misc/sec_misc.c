@@ -70,8 +70,7 @@ static ssize_t msm_feature_id_show(struct device *dev,
 		return scnprintf(buf, PAGE_SIZE, "%02d\n",feature_id);
 }
 
-static DEVICE_ATTR(msm_feature_id, S_IRUGO | S_IWUSR ,
-		msm_feature_id_show, NULL);
+static DEVICE_ATTR(msm_feature_id, S_IRUGO, msm_feature_id_show, NULL);
 /*  End of Feature ID */
 
 static struct device_attribute *sec_misc_attrs[] = {

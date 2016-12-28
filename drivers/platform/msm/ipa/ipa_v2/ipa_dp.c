@@ -1057,7 +1057,7 @@ void ipa_update_repl_threshold(enum ipa_client_type ipa_client)
 	 * Determine how many buffers/descriptors remaining will
 	 * cause to drop below the yellow WM bar.
 	 */
-	ep->rx_replenish_threshold = ipa_get_sys_yellow_wm()
+	ep->rx_replenish_threshold = ipa_get_sys_yellow_wm(ep->sys)
 					/ ep->sys->rx_buff_sz;
 }
 
@@ -1251,7 +1251,7 @@ int ipa2_setup_sys_pipe(struct ipa_sys_connect_params *sys_in, u32 *clnt_hdl)
 		 * Determine how many buffers/descriptors remaining will
 		 * cause to drop below the yellow WM bar.
 		 */
-		ep->rx_replenish_threshold = ipa_get_sys_yellow_wm()
+		ep->rx_replenish_threshold = ipa_get_sys_yellow_wm(ep->sys)
 						/ ep->sys->rx_buff_sz;
 		/* Only when the WAN pipes are setup, actual threshold will
 		 * be read from the register. So update LAN_CONS ep again with
@@ -2860,6 +2860,8 @@ static int ipa_assign_policy(struct ipa_sys_connect_params *in,
 					sys->pyld_hdlr = ipa_wan_rx_pyld_hdlr;
 					sys->rx_pool_sz =
 						ipa_ctx->wan_rx_ring_size;
+					in->ipa_ep_cfg.aggr.aggr_sw_eof_active
+						= true;
 					if (ipa_ctx->
 					ipa_client_apps_wan_cons_agg_gro) {
 						IPAERR("get close-by %u\n",
@@ -2930,7 +2932,6 @@ static int ipa_assign_policy(struct ipa_sys_connect_params *in,
 				if (sys->rx_pool_sz > IPA_WLAN_RX_POOL_SZ)
 					sys->rx_pool_sz = IPA_WLAN_RX_POOL_SZ;
 				sys->pyld_hdlr = NULL;
-				sys->repl_hdlr = ipa_replenish_wlan_rx_cache;
 				sys->get_skb = ipa_get_skb_ipa_rx;
 				sys->free_skb = ipa_free_skb_rx;
 				in->ipa_ep_cfg.aggr.aggr_en = IPA_BYPASS_AGGR;

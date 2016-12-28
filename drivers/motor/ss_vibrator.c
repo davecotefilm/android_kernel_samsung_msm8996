@@ -27,12 +27,23 @@
 
 #include "ss_vibrator.h"
 
+#ifdef CONFIG_SLPI_MOTOR
+#include "../adsp_factory/slpi_motor.h"
+
+int (*sensorCallback)(int, int);
+#endif
+
 /* default timeout */
 #define VIB_DEFAULT_TIMEOUT 10000
 
-extern void max77854_vibtonz_en(bool en);
 struct pm_qos_request pm_qos_req;
 static struct wake_lock vib_wake_lock;
+
+struct vib_tuning {
+	int m;
+	int n;
+	int str;
+};
 
 struct ss_vib {
 	struct device *dev;
@@ -45,6 +56,7 @@ struct ss_vib {
 	int state;
 	int timeout;
 	int intensity;
+	int multi_freq;
 	int timevalue;
 
 	unsigned int vib_pwm_gpio;	/* gpio number for vibrator pwm */
@@ -55,6 +67,7 @@ struct ss_vib {
 	unsigned int m_default;
 	unsigned int n_default;
 	unsigned int motor_strength;
+	struct vib_tuning tuning[MAX_FREQUENCY];
 	void (*power_onoff)(int onoff);
 };
 
@@ -63,11 +76,19 @@ void vibe_set_intensity(int intensity)
 	if (0 == intensity)
 		vibe_pwm_onoff(0);
 	else {
-		if (MAX_INTENSITY == intensity)
-			intensity = 1;
-		else if (0 != intensity) {
-			int tmp = MAX_INTENSITY - intensity;
-			intensity = (tmp / 79);	// 79 := 10000 / 127
+		if (f_multi_freq) {
+			if ((intensity < 0) || (intensity > MAX_INTENSITY)) {
+				intensity = MAX_INTENSITY;
+				pr_err("[VIB] used wrong intensity, force set [%d]\n", MAX_INTENSITY);
+			}
+			intensity = (intensity / 100);	// 100 = 10000 / 100
+		} else {
+			if (MAX_INTENSITY == intensity)
+				intensity = 1;
+			else if (0 != intensity) {
+				int tmp = MAX_INTENSITY - intensity;
+				intensity = (tmp / 79);	// 79 := 10000 / 127
+			}
 		}
 		vibe_set_pwm_freq(intensity);
 		vibe_pwm_onoff(1);
@@ -77,6 +98,7 @@ void vibe_set_intensity(int intensity)
 int32_t vibe_set_pwm_freq(int intensity)
 {
 	int32_t calc_d;
+	int32_t calc_n, half_n;
 
 	/* Put the MND counter in reset mode for programming */
 	HWIO_OUTM(GPx_CFG_RCGR, HWIO_GP_SRC_SEL_VAL_BMSK,
@@ -89,24 +111,49 @@ int32_t vibe_set_pwm_freq(int intensity)
 	HWIO_OUTM(GPx_M_REG, HWIO_GP_MD_REG_M_VAL_BMSK,
 		g_nlra_gp_clk_m << HWIO_GP_MD_REG_M_VAL_SHFT);
 
-	if (intensity > 0){
-		calc_d = g_nlra_gp_clk_n - (((intensity * g_nlra_gp_clk_pwm_mul) >> 8));
-		calc_d = calc_d * motor_strength / 100;
-		if(calc_d < motor_min_strength)
-			calc_d = motor_min_strength;
+	if (f_multi_freq) {
+		calc_n = (~(g_nlra_gp_clk_n - g_nlra_gp_clk_m) & 0xFF);
+
+		if (motor_strength > MAX_STRENGTH) {
+			motor_strength = MAX_STRENGTH;
+			pr_err("[VIB] used wrong motor_strength, force set [%d]\n", MAX_STRENGTH);
+		}
+
+		half_n = g_nlra_gp_clk_n >> 1;		// div 2, 50% duty D value is N / 2
+
+		calc_d = (half_n * motor_strength) / 100;
+		calc_d = (calc_d * intensity) / 100;
+		calc_d = half_n - calc_d;
+
+		calc_d = (~(calc_d << 1) & 0xFF);
+		
+		if (calc_d == 0xFF)
+			calc_d = 0xFE;
+
+		// D value
+		HWIO_OUTM(GPx_D_REG, HWIO_GP_MD_REG_D_VAL_BMSK, calc_d);
+
+		//N value
+		HWIO_OUTM(GPx_N_REG, HWIO_GP_N_REG_N_VAL_BMSK, calc_n);
 	} else {
-		calc_d = ((intensity * g_nlra_gp_clk_pwm_mul) >> 8) + g_nlra_gp_clk_d;
-		if(g_nlra_gp_clk_n - calc_d > g_nlra_gp_clk_n * motor_strength / 100)
-			calc_d = g_nlra_gp_clk_n - g_nlra_gp_clk_n * motor_strength / 100;
+		if (intensity > 0){
+			calc_d = g_nlra_gp_clk_n - (((intensity * g_nlra_gp_clk_pwm_mul) >> 8));
+			calc_d = calc_d * motor_strength / 100;
+			if(calc_d < motor_min_strength)
+				calc_d = motor_min_strength;
+		} else {
+			calc_d = ((intensity * g_nlra_gp_clk_pwm_mul) >> 8) + g_nlra_gp_clk_d;
+			if(g_nlra_gp_clk_n - calc_d > g_nlra_gp_clk_n * motor_strength / 100)
+				calc_d = g_nlra_gp_clk_n - g_nlra_gp_clk_n * motor_strength / 100;
+		}
+		// D value
+		HWIO_OUTM(GPx_D_REG, HWIO_GP_MD_REG_D_VAL_BMSK,
+				(~((int16_t)calc_d << 1)) << HWIO_GP_MD_REG_D_VAL_SHFT);
+
+		//N value
+		HWIO_OUTM(GPx_N_REG, HWIO_GP_N_REG_N_VAL_BMSK,
+				~(g_nlra_gp_clk_n - g_nlra_gp_clk_m) << 0);
 	}
-	// D value
-	HWIO_OUTM(GPx_D_REG, HWIO_GP_MD_REG_D_VAL_BMSK,
-	 (~((int16_t)calc_d << 1)) << HWIO_GP_MD_REG_D_VAL_SHFT);
-
-	//N value
-	HWIO_OUTM(GPx_N_REG, HWIO_GP_N_REG_N_VAL_BMSK,
-	 ~(g_nlra_gp_clk_n - g_nlra_gp_clk_m) << 0);
-
 	return VIBRATION_SUCCESS;
 }
 
@@ -157,6 +204,15 @@ static void set_vibrator(struct ss_vib *vib)
 	if (vib->state) {
 		wake_lock(&vib_wake_lock);
 		pm_qos_update_request(&pm_qos_req, PM_QOS_NONIDLE_VALUE);
+#ifdef CONFIG_SLPI_MOTOR
+		if (sensorCallback != NULL) {
+			sensorCallback(true, vib->timevalue);
+		} else {
+			pr_info("%s sensorCallback is null.start\n", __func__);
+			sensorCallback = getMotorCallback();
+			sensorCallback(true, vib->timevalue);
+		}
+#endif
 		motor_pinctrl = devm_pinctrl_get_select(vib->dev, "tlmm_motor_active");
 		if (IS_ERR(motor_pinctrl)) {
 			if (PTR_ERR(motor_pinctrl) == -EPROBE_DEFER)
@@ -186,6 +242,15 @@ static void set_vibrator(struct ss_vib *vib)
 			gpio_set_value(vib->vib_en_gpio, VIBRATION_OFF);
 		if (vib->power_onoff)
 			vib->power_onoff(0);
+#ifdef CONFIG_SLPI_MOTOR
+		if (sensorCallback != NULL) {
+			sensorCallback(false, vib->timevalue);
+		} else {
+			pr_info("%s sensorCallback is null.start\n", __func__);
+			sensorCallback = getMotorCallback();
+			sensorCallback(false, vib->timevalue);
+		}
+#endif
 		//PM_QOS_DEFAULT_VALUE
 		wake_unlock(&vib_wake_lock);
 		pm_qos_update_request(&pm_qos_req, PM_QOS_DEFAULT_VALUE);
@@ -205,7 +270,10 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 		vib->state = 0;
 		vib->timevalue = 0;
 	} else {
-		pr_info("[VIB]: ON, Duration : %d msec, intensity : %d\n", value, vib->intensity);
+		if (f_multi_freq)
+			pr_info("[VIB]: ON, Duration : %d msec, intensity : %d, freq : %d\n", value, vib->intensity, vib->multi_freq);
+		else 
+			pr_info("[VIB]: ON, Duration : %d msec, intensity : %d\n", value, vib->intensity);
 		vib->state = 1;
 		vib->timevalue = value;
 	}
@@ -301,25 +369,93 @@ static int vibrator_parse_dt(struct ss_vib *vib)
 		rc = 0;
 	}
 
-	rc = of_property_read_u32(np, "samsung,m_default", &vib->m_default);
+	rc = of_property_read_u32(np, "samsung,support_multi_freq", &f_multi_freq);
 	if (rc) {
-		pr_info("m_default not specified so using default address\n");
-		vib->m_default = GP_CLK_M_DEFAULT;
+		pr_info("support_multi_freq not specified so don't support multi freq\n");
+		f_multi_freq = 0;
 		rc = 0;
 	}
 
-	rc = of_property_read_u32(np, "samsung,n_default", &vib->n_default);
-	if (rc) {
-		pr_info("n_default not specified so using default address\n");
-		vib->n_default = GP_CLK_N_DEFAULT;
-		rc = 0;
-	}
+	if (f_multi_freq) {
+		int ret;
+		int array_val[3];
 
-	rc = of_property_read_u32(np, "samsung,motor_strength", &vib->motor_strength);
-	if (rc) {
-		pr_info("motor_strength not specified so using default address\n");
-		vib->motor_strength = MOTOR_STRENGTH;
-		rc = 0;
+		ret = of_property_read_u32_array(np, "samsung,freq_0", array_val, 3);
+		if (ret) {
+			pr_info("%s: Unable to read freq_0\n", __func__);
+			array_val[0] = GP_CLK_M_DEFAULT;
+			array_val[1] = GP_CLK_N_DEFAULT;
+			array_val[2] = MOTOR_STRENGTH;
+		}
+		vib->tuning[freq_0].m = array_val[0];
+		vib->tuning[freq_0].n = array_val[1];
+		vib->tuning[freq_0].str = array_val[2];
+
+		ret = of_property_read_u32_array(np, "samsung,freq_low", array_val, 3);
+		if (ret) {
+			pr_info("%s: Unable to read freq_low\n", __func__);
+			array_val[0] = GP_CLK_M_DEFAULT;
+			array_val[1] = GP_CLK_N_DEFAULT;
+			array_val[2] = MOTOR_STRENGTH;
+		}
+		vib->tuning[freq_low].m = array_val[0];
+		vib->tuning[freq_low].n = array_val[1];
+		vib->tuning[freq_low].str = array_val[2];
+
+		ret = of_property_read_u32_array(np, "samsung,freq_mid", array_val, 3);
+		if (ret) {
+			pr_info("%s: Unable to read freq_mid\n", __func__);
+			array_val[0] = GP_CLK_M_DEFAULT;
+			array_val[1] = GP_CLK_N_DEFAULT;
+			array_val[2] = MOTOR_STRENGTH;
+		}
+		vib->tuning[freq_mid].m = array_val[0];
+		vib->tuning[freq_mid].n = array_val[1];
+		vib->tuning[freq_mid].str = array_val[2];
+
+		ret = of_property_read_u32_array(np, "samsung,freq_high", array_val, 3);
+		if (ret) {
+			pr_info("%s: Unable to read freq_high\n", __func__);
+			array_val[0] = GP_CLK_M_DEFAULT;
+			array_val[1] = GP_CLK_N_DEFAULT;
+			array_val[2] = MOTOR_STRENGTH;
+		}
+		vib->tuning[freq_high].m = array_val[0];
+		vib->tuning[freq_high].n = array_val[1];
+		vib->tuning[freq_high].str = array_val[2];
+
+		ret = of_property_read_u32_array(np, "samsung,freq_alert", array_val, 3);
+		if (ret) {
+			pr_info("%s: Unable to read freq_alert\n", __func__);
+			array_val[0] = GP_CLK_M_DEFAULT;
+			array_val[1] = GP_CLK_N_DEFAULT;
+			array_val[2] = MOTOR_STRENGTH;
+		}
+		vib->tuning[freq_alert].m = array_val[0];
+		vib->tuning[freq_alert].n = array_val[1];
+		vib->tuning[freq_alert].str = array_val[2];
+	} else {
+		rc = of_property_read_u32(np, "samsung,m_default", &vib->m_default);
+		if (rc) {
+			pr_info("m_default not specified so using default address\n");
+			vib->m_default = GP_CLK_M_DEFAULT;
+			rc = 0;
+		}
+
+		rc = of_property_read_u32(np, "samsung,n_default", &vib->n_default);
+		if (rc) {
+			pr_info("n_default not specified so using default address\n");
+			vib->n_default = GP_CLK_N_DEFAULT;
+			rc = 0;
+		}
+
+		rc = of_property_read_u32(np, "samsung,motor_strength", &vib->motor_strength);
+		if (rc) {
+			pr_info("motor_strength not specified so using default address\n");
+			vib->motor_strength = MOTOR_STRENGTH;
+			rc = 0;
+		}
+
 	}
 
 	return rc;
@@ -396,6 +532,68 @@ static ssize_t intensity_show(struct device *dev,
 
 static DEVICE_ATTR(intensity, 0660, intensity_show, intensity_store);
 
+static ssize_t multi_freq_store(struct device *dev,
+		struct device_attribute *devattr, const char *buf, size_t count)
+{
+	struct timed_output_dev *t_dev = dev_get_drvdata(dev);
+	struct ss_vib *vib = container_of(t_dev, struct ss_vib, timed_dev); 
+	int ret = 0, set_freq = 0; 
+
+	ret = kstrtoint(buf, 0, &set_freq);
+
+	if ((set_freq < 0) || (set_freq >= MAX_FREQUENCY)) {
+		pr_err("[VIB]: %s out of freq range\n", __func__);
+		return -EINVAL;
+	}
+	switch (set_freq) {
+		case freq_alert :
+			g_nlra_gp_clk_m = vib->tuning[freq_alert].m;
+			g_nlra_gp_clk_n = vib->tuning[freq_alert].n;
+			motor_strength = vib->tuning[freq_alert].str;
+			break;
+		case freq_low :
+			g_nlra_gp_clk_m = vib->tuning[freq_low].m;
+			g_nlra_gp_clk_n = vib->tuning[freq_low].n;
+			motor_strength = vib->tuning[freq_low].str;
+			break;
+		case freq_mid :
+			g_nlra_gp_clk_m = vib->tuning[freq_mid].m;
+			g_nlra_gp_clk_n = vib->tuning[freq_mid].n;
+			motor_strength = vib->tuning[freq_mid].str;
+			break;
+		case freq_high :
+			g_nlra_gp_clk_m = vib->tuning[freq_high].m;
+			g_nlra_gp_clk_n = vib->tuning[freq_high].n;
+			motor_strength = vib->tuning[freq_high].str;
+			break;
+		case freq_0 :
+			g_nlra_gp_clk_m = vib->tuning[freq_0].m;
+			g_nlra_gp_clk_n = vib->tuning[freq_0].n;
+			motor_strength = vib->tuning[freq_0].str;
+			break;
+	}
+	g_nlra_gp_clk_d = g_nlra_gp_clk_n / 2;
+	g_nlra_gp_clk_pwm_mul = motor_strength;
+	motor_min_strength = g_nlra_gp_clk_n * MOTOR_MIN_STRENGTH / 100;
+
+	vib->multi_freq = set_freq;
+
+	pr_info("[VIB]: %s gp_m %d, gp_n %d, gp_d %d, pwm_mul %d, strength %d, min_str %d\n", __func__,
+			g_nlra_gp_clk_m, g_nlra_gp_clk_n, g_nlra_gp_clk_d,
+			g_nlra_gp_clk_pwm_mul, motor_strength, motor_min_strength);
+	return count;
+}
+
+static ssize_t multi_freq_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct timed_output_dev *t_dev = dev_get_drvdata(dev);
+	struct ss_vib *vib = container_of(t_dev, struct ss_vib, timed_dev); 
+	
+	return sprintf(buf, "%s %d\n", f_multi_freq ? "MULTI" : "FIXED", vib->multi_freq);
+}
+
+static DEVICE_ATTR(multi_freq, 0660, multi_freq_show, multi_freq_store);
 
 #if defined(CONFIG_MOTOR_DRV_MAX77854)
 static void regulator_power_onoff(int onoff)
@@ -410,7 +608,11 @@ static void regulator_power_onoff(int onoff)
 				PTR_ERR(reg_ldo));
 			return;
 		}
-		ret = regulator_set_voltage(reg_ldo, 2800000, 2800000);
+	
+		if (f_multi_freq)
+			ret = regulator_set_voltage(reg_ldo, 3350000, 3350000);
+		else
+			ret = regulator_set_voltage(reg_ldo, 2800000, 2800000);
 	}
 
 	if (onoff) {
@@ -479,12 +681,20 @@ static int ss_vibrator_probe(struct platform_device *pdev)
 
 	vib->power_onoff = regulator_power_onoff;
 	vib->intensity = MAX_INTENSITY;
-	g_nlra_gp_clk_m = vib->m_default;
-	g_nlra_gp_clk_n = vib->n_default;
-	g_nlra_gp_clk_d = (vib->n_default)/2;
-	g_nlra_gp_clk_pwm_mul = vib->n_default;
-	motor_strength = vib->motor_strength;
-	motor_min_strength = g_nlra_gp_clk_n*MOTOR_MIN_STRENGTH/100;
+	if (f_multi_freq) {
+		g_nlra_gp_clk_m = vib->tuning[freq_alert].m;
+		g_nlra_gp_clk_n = vib->tuning[freq_alert].n;
+		motor_strength = vib->tuning[freq_alert].str;
+		vib->multi_freq = freq_alert;
+	} else {
+		g_nlra_gp_clk_m = vib->m_default;
+		g_nlra_gp_clk_n = vib->n_default;
+		motor_strength = vib->motor_strength;
+		vib->multi_freq = MAX_FREQUENCY;
+	}
+	g_nlra_gp_clk_d = (g_nlra_gp_clk_n / 2);
+	g_nlra_gp_clk_pwm_mul = g_nlra_gp_clk_n;
+	motor_min_strength = g_nlra_gp_clk_n * MOTOR_MIN_STRENGTH/100;
 
 	vib->timeout = VIB_DEFAULT_TIMEOUT;
 
@@ -525,6 +735,13 @@ static int ss_vibrator_probe(struct platform_device *pdev)
 	rc = sysfs_create_file(&vib->timed_dev.dev->kobj, &dev_attr_intensity.attr);
 	if (rc < 0) {
 		pr_err("[VIB]: Failed to register sysfs intensity: %d\n", rc);
+	}
+
+	if (f_multi_freq) {
+		rc = sysfs_create_file(&vib->timed_dev.dev->kobj, &dev_attr_multi_freq.attr);
+		if (rc < 0) {
+			pr_err("[VIB]: Failed to register sysfs multi_freq: %d\n", rc);
+		}
 	}
 
 	vib_dev = device_create(sec_class, NULL, 0, NULL, "vib");

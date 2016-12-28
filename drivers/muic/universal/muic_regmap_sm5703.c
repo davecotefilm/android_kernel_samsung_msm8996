@@ -461,9 +461,11 @@ static int sm5703_get_vps_data(struct regmap_desc *pdesc, void *pbuf)
 
 	attr = RSVDID1_VBUSIN_VALID;
 	*(u8 *)&pvps->s.vbvolt = regmap_read_value(pdesc, attr);
+	pr_info("%s, vbus %d\n", __func__, pmuic->vps.s.vbvolt);
 
 	attr = ADC_ADC_VALUE;
 	*(u8 *)&pvps->s.adc = regmap_read_value(pdesc, attr);
+	pr_info("%s, adc %d\n", __func__, pmuic->vps.s.adc);
 
 	return 0;
 }

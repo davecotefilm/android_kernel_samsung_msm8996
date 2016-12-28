@@ -403,7 +403,7 @@ int rtc6213n_start(struct rtc6213n_device *radio)
 	u16 swbk5[] = {
 		0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x7000, 0x6000,
 		0x3590, 0x6311, 0x3008, 0x0019, 0x0D79, 0x7D2F, 0x8000,
-		0x02A1, 0x771F, 0x323E, 0x2635, 0xA516, 0x8680, 0x0000,
+		0x02A1, 0x771F, 0x323E, 0x262E, 0xA516, 0x8680, 0x0000,
 		0x0000, 0x0000};
 	u16 swbk7[] = {
 		0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x7000, 0xE000,
@@ -425,14 +425,14 @@ int rtc6213n_start(struct rtc6213n_device *radio)
 	if (retval < 0)
 		goto done;
     /* should insert delay large than 300ms before writing 0x96AA */
-	msleep(50);
+	msleep(10);
 #endif
 	/* Don't read all between writing 0x16AA and 0x96AA */
 	radio->registers[DEVICEID] = 0x96AA;
 	retval = rtc6213n_set_register(radio, DEVICEID);
 	if (retval < 0)
 		goto done;
-	msleep(300);
+	msleep(10);
 
 	/* get device and chip versions */
 	/* Have to update shadow buf from all register */

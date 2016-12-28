@@ -197,6 +197,30 @@
 		23 19 08 08 05 03 04 a0];
 };
 
+#include "../../../../drivers/video/msm/mdss/samsung/S6E3HA5_AMB567MK01/dsi_panel_S6E3HA5_AMB567MK01_wqhd_octa_cmd.dtsi"
+
+/* 898 Mbps */
+&ss_dsi_panel_S6E3HA5_AMB567MK01_WQHD {
+	qcom,mdss-dsi-panel-timings-8996 = [
+		24 1F 08 09 05 03 04 a0
+		24 1F 08 09 05 03 04 a0
+		24 1F 08 09 05 03 04 a0
+		24 1F 08 09 05 03 04 a0
+		24 1B 08 09 05 03 04 a0];
+};
+
+#include "../../../../drivers/video/msm/mdss/samsung/S6E3HF4_AMB509ME01/dsi_panel_S6E3HF4_AMB509ME01_wqhd_octa_cmd.dtsi"
+
+/* 898 Mbps */
+&ss_dsi_panel_S6E3HF4_AMB509ME01_WQHD {
+	qcom,mdss-dsi-panel-timings-8996 = [
+		24 1F 08 09 05 03 04 a0
+		24 1F 08 09 05 03 04 a0
+		24 1F 08 09 05 03 04 a0
+		24 1F 08 09 05 03 04 a0
+		24 1B 08 09 05 03 04 a0];
+};
+
 #include "../../../../drivers/video/msm/mdss/samsung/S6E3HF4_AMB526JS01/dsi_panel_S6E3HF4_AMB526JS01_wqhd_octa_cmd.dtsi"
 
 /* 898 Mbps */
@@ -239,6 +263,17 @@
 		24 1F 08 09 05 03 04 a0
 		24 1F 08 09 05 03 04 a0
 		24 1E 08 09 05 03 04 a0];
+};
+
+#include "../../../../drivers/video/msm/mdss/samsung/S6E3FA3_AMS549KU01/dsi_panel_S6E3FA3_AMS549KU01_fhd_octa_cmd.dtsi"
+
+&ss_dsi_panel_S6E3FA3_AMS549KU01_FHD {
+	qcom,mdss-dsi-panel-timings-8996 = [
+		23 1F 07 09 05 03 04 a0
+		23 1F 07 09 05 03 04 a0
+		23 1F 07 09 05 03 04 a0
+		23 1F 07 09 05 03 04 a0
+		23 19 08 08 05 03 04 a0];
 };
 
 #include "../../../../drivers/video/msm/mdss/samsung/PBA_BOOTING_HD/dsi_panel_PBA_BOOTING_hd_video.dtsi"

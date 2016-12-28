@@ -14,85 +14,7 @@
 	ss_dsi_panel_S6E3HF4_AMB526JS01_WQHD: ss_dsi_panel_S6E3HF4_AMB526JS01_WQHD {
 		qcom,mdss-dsi-panel-name = "ss_dsi_panel_S6E3HF4_AMB526JS01_WQHD";
 		label = "ss_dsi_panel_S6E3HF4_AMB526JS01_WQHD";
-		qcom,mdss-dsi-panel-width = <1440>;
-		qcom,mdss-dsi-panel-height = <2560>;
 		qcom,mdss-dsi-bpp = <24>;
-		qcom,mdss-dsi-panel-timings = [FE 56 3C 00 74 88 3C 56 4A 03 04 A0];
-
-		qcom,mdss-dsi-on-command= [
-			29 00 00 00 05 00 03 F0 5A 5A		/* TEST KEY1 Enable - 5ms */
-
-			/* DSC setting */
-			07 01 00 00 00 00 01 01				/* DSC enable */
-
-			0A 01 00 00 0A 00 58				/* PPS setting */
-				11 00 00 89 30 80 0A
-				00 05 A0 00 40 01 68
-				01 68 02 00 01 B4 00
-				20 04 F2 00 05 00 0C
-				01 87 02 63 18 00 10
-				F0 03 0C 20 00 06 0B
-				0B 33 0E 1C 2A 38 46
-				54 62 69 70 77 79 7B
-				7D 7E 01 02 01 00 09
-				40 09 BE 19 FC 19 FA
-				19 F8 1A 38 1A 78 1A
-				B6 2A F6 2B 34 2B 74
-				3B 74 6B F4
-
-			05 01 00 00 05 00 01 11				/* sleep out */
-			29 01 00 00 05 00 02 E6 01			/* HS Timer Disable - prevent DSC being disable */
-
-			/* checksum disable */
-			29 00 00 00 00 00 03 FC 5A 5A
-			29 00 00 00 00 00 02 B0 35
-			29 00 00 00 00 00 02 FE 03
-			29 01 00 00 78 00 03 FC A5 A5
-
-			/* Sleep out, wait 120 ms */
-
-			29 00 00 00 00 00 02 35 00			/* TE Vsync ON */
-
-			29 00 00 00 00 00 02 ED 44			/* ERR_FG */
-
-
-			/* FFC Setting(898Mbps) */
-			29 00 00 00 00 00 03 FC 5A 5A
-			29 00 00 00 00 00 12 CE
-				0D 58 14 5E 38 B8 F2 03
-				00 FF 02 0A 0A 0A 0A 0F
-				23
-			29 00 00 00 00 00 03 FC A5 A5
-
-			29 00 00 00 00 00 24				/* Brightness condition set */
-				CA
-				01 00 01 00 01 00
-				80 80 80
-				80 80 80
-				80 80 80
-				80 80 80
-				80 80 80
-				80 80 80
-				80 80 80
-				80 80 80
-				00 00 00
-				00 00
-			29 00 00 00 00 00 03 B1 10 03		/* AID 0% */
-			29 00 00 00 00 00 02 B0 01
-			29 00 00 00 00 00 03 B5 BC 0A		/* ELVSS Setting:CAPS ON : acl off */
-			29 00 00 00 00 00 03 F4 BB 1E		/* VINT set */
-
-			29 01 00 00 01 00 02 F7 03			/* Gamma, LTPS(AID) update wait more 100ns */
-			29 00 00 00 00 00 02 F7 00
-
-			29 01 00 00 00 00 03 F0 A5 A5		/* TEST KEY key Disable  */
-		];
-
-		qcom,mdss-dsi-off-command=[
-			05 01 00 00 00 00 02 28 00
-			05 01 00 00 78 00 02 10 00	/* wait 120ms(0x78) */
-		];
-
 		qcom,cont-splash-enabled;
 		/*qcom,dcs-cmd-by-left;*/
 		/*qcom,cmd-sync-wait-broadcast;*/
@@ -138,14 +60,17 @@
 		/*qcom,mdss-dsi-pwm-gpio=*/
 
 		qcom,mdss-dsi-bl-min-level = <1>;
-		qcom,mdss-dsi-bl-max-level = <255>;
-		qcom,mdss-brightness-max-level = <255>;
+		qcom,mdss-dsi-bl-max-level = <365>;
+		qcom,mdss-brightness-max-level = <365>;
 		qcom,mdss-dsi-interleave-mode = <0>;
 		qcom,mdss-dsi-panel-type = "dsi_cmd_mode";
 
 		/*qcom,mdss-dsi-te-check-enable; */
 		qcom,mdss-dsi-te-using-te-pin;
 		qcom,mdss-dsi-te-pin-select = <1>;
+
+		/*qcom,dynamic-mode-switch-enabled;*/
+		/*qcom,dynamic-mode-switch-type = "dynamic-switch-immediate";*/
 
 		qcom,mdss-dsi-te-dcs-command = <1>;
 		qcom,mdss-dsi-wr-mem-start = <0x2C>;
@@ -180,7 +105,6 @@
 		qcom,mdss-dsi-dma-trigger = "trigger_sw";
 		qcom,mdss-dsi-panel-framerate = <60>;
 /*		qcom,mdss-dsi-panel-clockrate = <898000000>;*/
-		qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
 		qcom,mdss-dsi-off-command-state = "dsi_hs_mode";
 
 		qcom,mdss-pan-physical-width-dimension = <68>; /* 68.4*/
@@ -200,7 +124,6 @@
 		qcom,mdss-dsi-reset-sequence = <1 5>, <0 5>, <1 5>;
 		qcom,partial-update-enabled;
 		/*qcom,partial-update-roi-merge;*/
-		qcom,panel-roi-alignment=<360 64 360 64 360 64>;
 		/*qcom,mdss-dsi-horizontal-line-idle*/
 
 		qcom,mdss-dsi-lp11-init;
@@ -216,6 +139,11 @@
 		qcom,mdss-dsi-panel-status-value=<1>;
 		/*qcom,mdss-dsi-panel-status-irq-trigger1 = "rising";*/
 		qcom,mdss-dsi-panel-status-irq-trigger1 = "falling";
+
+		qcom,mdss-dsi-off-command=[
+			05 01 00 00 00 00 02 28 00
+			05 01 00 00 78 00 02 10 00	/* wait 120ms(0x78) */
+		];
 
 		samsung,esd_2c_short_tx_cmds_revA = [
 			05 01 00 00 00 00 01 2c
@@ -240,6 +168,7 @@
 		samsung,support_irc;
 		samsung,elvss_interpolation_temperature = <(-15)>;
 		samsung,support_factory_panel_swap;
+		samsung,support_multires;
 
 		/*
 		* ************************************************************************************************************************
@@ -607,6 +536,7 @@
 		* ************************************************************************************************************************
 		*/
 
+		samsung,enter_hbm_lux = <10000>;
 		samsung,hbm_rx_cmds_revA = [ 06 01 00 00 00 00 01 c8 0F 32];	/* read C8 51~65th , 50=0x32 */
 		samsung,hbm2_rx_cmds_revA = [ 06 01 00 00 00 00 01 c8 14 44];	/* read C8 69~88th , 68=0x44 */
 
@@ -679,6 +609,16 @@
 
 		samsung,irc_off_tx_cmds_revA = [
 			29 01 00 00 00 00 02 B8 00	 /* IRC OFF */
+		];
+
+		/*
+		* ************************************************************************************************************************
+		*  H/W Cursor
+		* ************************************************************************************************************************
+		*/
+
+		samsung,hw_cursor_tx_cmds_revA = [
+			29 01 00 00 00 00 0F E4 00 01 00 04 00 00 05 00 66 00 00 00 3C 1E
 		];
 
 		/*
@@ -2084,7 +2024,121 @@
 			29 01 00 00 00 00 03 B1 00 0C  /* 254 */
 			29 01 00 00 00 00 03 B1 00 0C  /* 255 */
 		];
+		samsung,panel_mutires_fhd_to_wqhd_revA = [
+			29 00 00 00 05 00 03 F0 5A 5A		/* TEST KEY1 Enable */
 
+			29 00 00 00 00 00 05 2A 00 00 05 9F	/* CASET PASET */
+			29 00 00 00 00 00 05 2B 00 00 09 FF
+
+			29 00 00 00 00 00 02 B0 0A
+			29 00 00 00 00 00 03 F2 0c 2A		/* PPS 2Ch latch O, Scaler on/off 2Ch latch O, Black frame insertion X*/
+
+			0A 01 00 00 0A 00 58				/* PPS setting wqhd */
+				11 00 00 89 30 80 0A
+				00 05 A0 00 20 02 D0
+				02 D0 02 00 02 68 00
+				20 03 87 00 0A 00 0C
+				03 19 02 63 18 00 10
+				F0 03 0C 20 00 06 0B
+				0B 33 0E 1C 2A 38 46
+				54 62 69 70 77 79 7B
+				7D 7E 01 02 01 00 09
+				40 09 BE 19 FC 19 FA
+				19 F8 1A 38 1A 78 1A
+				B6 2A F6 2B 34 2B 74
+				3B 74 6B F4
+
+			29 00 00 00 00 00 02 BA 03			/* scaler setup */
+
+			29 01 00 00 00 00 03 F0 A5 A5		/* TEST KEY Disable */
+		];
+
+		samsung,panel_mutires_hd_to_wqhd_revA = [
+			29 00 00 00 05 00 03 F0 5A 5A		/* TEST KEY1 Enable */
+
+			29 00 00 00 00 00 05 2A 00 00 05 9F	/* CASET PASET */
+			29 00 00 00 00 00 05 2B 00 00 09 FF
+
+			29 00 00 00 00 00 02 B0 0A
+			29 00 00 00 00 00 03 F2 0c 2A		/* PPS 2Ch latch O, Scaler on/off 2Ch latch O, Black frame insertion X*/
+
+			0A 01 00 00 0A 00 58				/* PPS setting wqhd */
+				11 00 00 89 30 80 0A
+				00 05 A0 00 20 02 D0
+				02 D0 02 00 02 68 00
+				20 03 87 00 0A 00 0C
+				03 19 02 63 18 00 10
+				F0 03 0C 20 00 06 0B
+				0B 33 0E 1C 2A 38 46
+				54 62 69 70 77 79 7B
+				7D 7E 01 02 01 00 09
+				40 09 BE 19 FC 19 FA
+				19 F8 1A 38 1A 78 1A
+				B6 2A F6 2B 34 2B 74
+				3B 74 6B F4
+
+			29 00 00 00 00 00 02 BA 03			/* scaler setup */
+
+			29 01 00 00 00 00 03 F0 A5 A5		/* TEST KEY Disable */
+		];
+
+		samsung,panel_mutires_fhd_revA = [
+			29 00 00 00 05 00 03 F0 5A 5A		/* TEST KEY1 Enable */
+
+			29 00 00 00 00 00 05 2A 00 00 04 37	/* CASET PASET */
+			29 00 00 00 00 00 05 2B 00 00 07 7F
+
+			29 00 00 00 00 00 02 B0 0A
+			29 00 00 00 00 00 03 F2 0c 2A		/* PPS 2Ch latch O, Scaler on/off 2Ch latch O, Black frame insertion X*/
+
+			0A 01 00 00 0A 00 58				/* PPS setting fhd */
+				11 00 00 89 30 80 07
+				80 04 38 00 20 02 1C
+				02 1C 02 00 02 0E 00
+				20 03 15 00 07 00 0C
+				03 19 03 2E 18 00 10
+				F0 03 0C 20 00 06 0B
+				0B 33 0E 1C 2A 38 46
+				54 62 69 70 77 79 7B
+				7D 7E 01 02 01 00 09
+				40 09 BE 19 FC 19 FA
+				19 F8 1A 38 1A 78 1A
+				B6 2A F6 2B 34 2B 74
+				3B 74 6B F4
+
+			29 00 00 00 00 00 02 BA 02			/* scaler setup */
+
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+		];
+
+		samsung,panel_mutires_hd_revA = [
+			29 00 00 00 05 00 03 F0 5A 5A		/* TEST KEY1 Enable */
+
+			29 00 00 00 00 00 05 2A 00 00 02 CF	/* CASET PASET */
+			29 00 00 00 00 00 05 2B 00 00 04 FF
+
+			29 00 00 00 00 00 02 B0 0A
+			29 00 00 00 00 00 03 F2 0c 2A		/* PPS 2Ch latch O, Scaler on/off 2Ch latch O, Black frame insertion X*/
+
+			0A 01 00 00 0A 00 58				/* PPS setting hd */
+				11 00 00 89 30 80 05
+				00 02 D0 00 40 01 68
+				01 68 02 00 01 B4 00
+				20 04 F2 00 05 00 0C
+				01 87 02 63 18 00 10
+				F0 03 0C 20 00 06 0B
+				0B 33 0E 1C 2A 38 46
+				54 62 69 70 77 79 7B
+				7D 7E 01 02 01 00 09
+				40 09 BE 19 FC 19 FA
+				19 F8 1A 38 1A 78 1A
+				B6 2A F6 2B 34 2B 74
+				3B 74 6B F4
+
+			29 00 00 00 00 00 02 BA 00			/* scaler setup */
+
+			29 01 00 00 00 00 03 F0 A5 A5		/* TEST KEY Disable */
+		];
 		/*
 		* ************************************************************************************************************************
 		* ACL command list and mappings
@@ -2404,6 +2458,15 @@
 			73	251	255	420
 		>;
 
+		samsung,hbm_candela_map_table_revA = <
+			0	282	295	465	6
+			1	296	309	488	7
+			2	310	323	510	8
+			3	324	336	533	9
+			4	337	350	555	10
+			5	351	364	578	11
+			6	365	365	600	12
+		>;
 		/*
 		* ************************************************************************************************************************
 		*  HMT
@@ -2609,23 +2672,350 @@
 
 		/*
 		* ************************************************************************************************************************
-		*  DSC
+		*  MULTI_RESOLUTION (DSC configs were moved all to below timing set)
 		* ************************************************************************************************************************
 		*/
 
-		qcom,compression-mode = "dsc";
-		qcom,config-select = <&dsi_S6E3HF4_AMB526JS01_dsc_cmd_config0>;
+		qcom,mdss-dsi-display-timings {
+			wqhd {
+				qcom,mdss-dsi-timing-default;
+				qcom,mdss-dsi-panel-width = <1440>;
+				qcom,mdss-dsi-panel-height = <2560>;
+				qcom,mdss-dsi-h-pulse-width = <52>;
+				qcom,mdss-dsi-h-back-porch = <156>;
+				qcom,mdss-dsi-h-front-porch = <152>;
+				qcom,mdss-dsi-h-sync-skew = <0>;
+				qcom,mdss-dsi-v-pulse-width = <100>;
+				qcom,mdss-dsi-v-back-porch = <160>;
+				qcom,mdss-dsi-v-front-porch = <150>;
+				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-dsi-panel-timings = [FE 56 3C 00 74 88 3C 56 4A 03 04 A0];
+				/*qcom,mdss-dsi-timing-switch-command; use samsung,panel_multires_XXX instead*/
+				/*qcom,mdss-dsi-timing-switch-command-state;*/
+				qcom,mdss-dsi-t-clk-pre = <0x30>;
+				qcom,mdss-dsi-t-clk-post = <0x0D>;
 
-		dsi_S6E3HF4_AMB526JS01_dsc_cmd_config0: config0 {
-			qcom,lm-split = <720 720>;
-			qcom,mdss-dsc-encoders = <2>;
-			qcom,mdss-dsc-slice-height = <64>;
-			qcom,mdss-dsc-slice-width = <360>;
-			qcom,mdss-dsc-slice-per-pkt = <1>;
+				qcom,mdss-dsi-panel-timings-8996 = [
+					24 1F 08 09 05 03 04 a0
+					24 1F 08 09 05 03 04 a0
+					24 1F 08 09 05 03 04 a0
+					24 1F 08 09 05 03 04 a0
+					24 1B 08 09 05 03 04 a0
+				];
+				qcom,mdss-dsi-on-command = [
+					29 00 00 00 05 00 03 F0 5A 5A		/* TEST KEY1 Enable - 5ms */
 
-			qcom,mdss-dsc-bit-per-component = <8>;
-			qcom,mdss-dsc-bit-per-pixel = <8>;
-			qcom,mdss-dsc-block-prediction-enable;
+					/* DSC setting */
+					07 01 00 00 00 00 01 01				/* DSC enable */
+
+					05 01 00 00 05 00 01 11				/* sleep out */
+
+					29 01 00 00 05 00 02 E6 01			/* HS Timer Disable - prevent DSC being disable */
+
+					/* checksum disable */
+					29 00 00 00 00 00 03 FC 5A 5A
+					29 00 00 00 00 00 02 B0 35
+					29 00 00 00 00 00 02 FE 03
+					29 01 00 00 78 00 03 FC A5 A5
+
+					/* Sleep out, wait 120 ms */
+
+					29 00 00 00 00 00 02 35 00			/* TE Vsync ON */
+
+					29 00 00 00 00 00 02 ED 44			/* ERR_FG */
+
+					29 00 00 00 00 00 05 2A 00 00 05 9F	/* CASET PASET */
+					29 00 00 00 00 00 05 2B 00 00 09 FF
+
+					0A 01 00 00 0A 00 58				/* PPS setting wqhd */
+						11 00 00 89 30 80 0A
+						00 05 A0 00 20 02 D0
+						02 D0 02 00 02 68 00
+						20 03 87 00 0A 00 0C
+						03 19 02 63 18 00 10
+						F0 03 0C 20 00 06 0B
+						0B 33 0E 1C 2A 38 46
+						54 62 69 70 77 79 7B
+						7D 7E 01 02 01 00 09
+						40 09 BE 19 FC 19 FA
+						19 F8 1A 38 1A 78 1A
+						B6 2A F6 2B 34 2B 74
+						3B 74 6B F4
+
+					29 00 00 00 00 00 02 BA 01			/* scaler setup */
+
+					/* FFC Setting(898Mbps) */
+					29 00 00 00 00 00 03 FC 5A 5A
+					29 00 00 00 00 00 12 CE
+						0D 58 14 5E 38 B8 F2 03
+						00 FF 02 0A 0A 0A 0A 0F
+						23
+					29 00 00 00 00 00 03 FC A5 A5
+
+					29 00 00 00 00 00 24				/* Brightness condition set */
+						CA
+						01 00 01 00 01 00
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						00 00 00
+						00 00
+					29 00 00 00 00 00 03 B1 10 03		/* AID 0% */
+					29 00 00 00 00 00 02 B0 01
+					29 00 00 00 00 00 03 B5 BC 0A		/* ELVSS Setting:CAPS ON : acl off */
+					29 00 00 00 00 00 03 F4 BB 1E		/* VINT set */
+
+					29 01 00 00 01 00 02 F7 03			/* Gamma, LTPS(AID) update wait more 100ns */
+					29 00 00 00 00 00 02 F7 00
+
+					29 01 00 00 00 00 03 F0 A5 A5		/* TEST KEY key Disable  */
+				];
+				qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
+				qcom,panel-roi-alignment=<720 32 720 32 720 32>;
+				qcom,compression-mode = "dsc";
+				qcom,config-select = <&dsc_wqhd_hf4>;
+				dsc_wqhd_hf4: config_wqhd_hf4 {
+					qcom,lm-split = <720 720>;
+					qcom,mdss-dsc-encoders = <2>;
+					qcom,mdss-dsc-slice-height = <32>;
+					qcom,mdss-dsc-slice-width = <720>;
+					qcom,mdss-dsc-slice-per-pkt = <1>;
+
+					qcom,mdss-dsc-bit-per-component = <8>;
+					qcom,mdss-dsc-bit-per-pixel = <8>;
+					qcom,mdss-dsc-block-prediction-enable;
+				};
+			};
+			fhd {
+				qcom,mdss-dsi-panel-width = <1080>;
+				qcom,mdss-dsi-panel-height = <1920>;
+				qcom,mdss-dsi-h-pulse-width = <52>;
+				qcom,mdss-dsi-h-back-porch = <276>;
+				qcom,mdss-dsi-h-front-porch = <152>;
+				qcom,mdss-dsi-h-sync-skew = <0>;
+				qcom,mdss-dsi-v-pulse-width = <100>;
+				qcom,mdss-dsi-v-back-porch = <160>;
+				qcom,mdss-dsi-v-front-porch = <790>;
+				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-dsi-panel-timings = [FE 56 3C 00 74 88 3C 56 4A 03 04 A0];
+				/*qcom,mdss-dsi-timing-switch-command; use samsung,panel_multires_XXX instead*/
+				/*qcom,mdss-dsi-timing-switch-command-state;*/
+				qcom,mdss-dsi-t-clk-pre = <0x30>;
+				qcom,mdss-dsi-t-clk-post = <0x0D>;
+
+				qcom,mdss-dsi-panel-timings-8996 = [
+					24 1F 08 09 05 03 04 a0
+					24 1F 08 09 05 03 04 a0
+					24 1F 08 09 05 03 04 a0
+					24 1F 08 09 05 03 04 a0
+					24 1B 08 09 05 03 04 a0
+				];
+				qcom,mdss-dsi-on-command = [
+					29 00 00 00 05 00 03 F0 5A 5A		/* TEST KEY1 Enable - 5ms */
+
+					/* DSC setting */
+					07 01 00 00 00 00 01 01				/* DSC enable */
+
+					05 01 00 00 05 00 01 11				/* sleep out */
+					29 01 00 00 05 00 02 E6 01			/* HS Timer Disable - prevent DSC being disable */
+
+					/* checksum disable */
+					29 00 00 00 00 00 03 FC 5A 5A
+					29 00 00 00 00 00 02 B0 35
+					29 00 00 00 00 00 02 FE 03
+					29 01 00 00 78 00 03 FC A5 A5
+
+					/* Sleep out, wait 120 ms */
+
+					29 00 00 00 00 00 02 35 00			/* TE Vsync ON */
+
+					29 00 00 00 00 00 02 ED 44			/* ERR_FG */
+
+					29 00 00 00 00 00 05 2A 00 00 04 37	/* CASET PASET */
+					29 00 00 00 00 00 05 2B 00 00 07 7F
+
+					0A 01 00 00 0A 00 58				/* PPS setting fhd */
+						11 00 00 89 30 80 07
+						80 04 38 00 20 02 1C
+						02 1C 02 00 02 0E 00
+						20 03 15 00 07 00 0C
+						03 19 03 2E 18 00 10
+						F0 03 0C 20 00 06 0B
+						0B 33 0E 1C 2A 38 46
+						54 62 69 70 77 79 7B
+						7D 7E 01 02 01 00 09
+						40 09 BE 19 FC 19 FA
+						19 F8 1A 38 1A 78 1A
+						B6 2A F6 2B 34 2B 74
+						3B 74 6B F4
+
+					29 00 00 00 00 00 02 BA 02			/* scaler setup */
+
+					/* FFC Setting(898Mbps) */
+					29 00 00 00 00 00 03 FC 5A 5A
+					29 00 00 00 00 00 12 CE
+						0D 58 14 5E 38 B8 F2 03
+						00 FF 02 0A 0A 0A 0A 0F
+						23
+					29 00 00 00 00 00 03 FC A5 A5
+
+					29 00 00 00 00 00 24				/* Brightness condition set */
+						CA
+						01 00 01 00 01 00
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						00 00 00
+						00 00
+					29 00 00 00 00 00 03 B1 10 03		/* AID 0% */
+					29 00 00 00 00 00 02 B0 01
+					29 00 00 00 00 00 03 B5 BC 0A		/* ELVSS Setting:CAPS ON : acl off */
+					29 00 00 00 00 00 03 F4 BB 1E		/* VINT set */
+
+					29 01 00 00 01 00 02 F7 03			/* Gamma, LTPS(AID) update wait more 100ns */
+					29 00 00 00 00 00 02 F7 00
+
+					29 01 00 00 00 00 03 F0 A5 A5		/* TEST KEY key Disable  */
+				];
+				qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
+				qcom,panel-roi-alignment=<540 32 540 32 540 32>;
+				qcom,compression-mode = "dsc";
+				qcom,config-select = <&dsc_fhd_hf4>;
+				dsc_fhd_hf4: config_fhd_hf4 {
+					qcom,lm-split = <540 540>;
+					qcom,mdss-dsc-encoders = <2>;
+					qcom,mdss-dsc-slice-height = <32>;
+					qcom,mdss-dsc-slice-width = <540>;
+					qcom,mdss-dsc-slice-per-pkt = <1>;
+
+					qcom,mdss-dsc-bit-per-component = <8>;
+					qcom,mdss-dsc-bit-per-pixel = <8>;
+					qcom,mdss-dsc-block-prediction-enable;
+				};
+			};
+			hd {
+				qcom,mdss-dsi-panel-width = <720>;
+				qcom,mdss-dsi-panel-height = <1280>;/*<1080>*/
+				qcom,mdss-dsi-h-pulse-width = <52>;
+				qcom,mdss-dsi-h-back-porch = <396>;/*<876>;*/
+				qcom,mdss-dsi-h-front-porch = <152>;
+				qcom,mdss-dsi-h-sync-skew = <0>;
+				qcom,mdss-dsi-v-pulse-width = <100>;
+				qcom,mdss-dsi-v-back-porch = <160>;
+				qcom,mdss-dsi-v-front-porch = <1430>;/*<1630>;*/
+				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-dsi-panel-timings = [FE 56 3C 00 74 88 3C 56 4A 03 04 A0];
+				/*qcom,mdss-dsi-timing-switch-command; use samsung,panel_multires_XXX instead*/
+				/*qcom,mdss-dsi-timing-switch-command-state;*/
+				qcom,mdss-dsi-t-clk-pre = <0x30>;
+				qcom,mdss-dsi-t-clk-post = <0x0D>;
+
+				qcom,mdss-dsi-panel-timings-8996 = [
+					24 1F 08 09 05 03 04 a0
+					24 1F 08 09 05 03 04 a0
+					24 1F 08 09 05 03 04 a0
+					24 1F 08 09 05 03 04 a0
+					24 1B 08 09 05 03 04 a0
+				];
+				qcom,mdss-dsi-on-command = [
+					29 00 00 00 05 00 03 F0 5A 5A		/* TEST KEY1 Enable - 5ms */
+
+					/* DSC setting */
+					07 01 00 00 00 00 01 01				/* DSC enable */
+
+					05 01 00 00 05 00 01 11				/* sleep out */
+					29 01 00 00 05 00 02 E6 01			/* HS Timer Disable - prevent DSC being disable */
+
+					/* checksum disable */
+					29 00 00 00 00 00 03 FC 5A 5A
+					29 00 00 00 00 00 02 B0 35
+					29 00 00 00 00 00 02 FE 03
+					29 01 00 00 78 00 03 FC A5 A5
+
+					/* Sleep out, wait 120 ms */
+
+					29 00 00 00 00 00 02 35 00			/* TE Vsync ON */
+
+					29 00 00 00 00 00 02 ED 44			/* ERR_FG */
+
+					29 00 00 00 00 00 05 2A 00 00 02 CF	/* CASET PASET */
+					29 00 00 00 00 00 05 2B 00 00 04 FF
+
+					0A 01 00 00 0A 00 58				/* PPS setting hd*/
+						11 00 00 89 30 80 05
+						00 02 D0 00 40 01 68
+						01 68 02 00 01 B4 00
+						20 04 F2 00 05 00 0C
+						01 87 02 63 18 00 10
+						F0 03 0C 20 00 06 0B
+						0B 33 0E 1C 2A 38 46
+						54 62 69 70 77 79 7B
+						7D 7E 01 02 01 00 09
+						40 09 BE 19 FC 19 FA
+						19 F8 1A 38 1A 78 1A
+						B6 2A F6 2B 34 2B 74
+						3B 74 6B F4
+
+					29 00 00 00 00 00 02 BA 00			/* scaler setup */
+
+					/* FFC Setting(898Mbps) */
+					29 00 00 00 00 00 03 FC 5A 5A
+					29 00 00 00 00 00 12 CE
+						0D 58 14 5E 38 B8 F2 03
+						00 FF 02 0A 0A 0A 0A 0F
+						23
+					29 00 00 00 00 00 03 FC A5 A5
+
+					29 00 00 00 00 00 24				/* Brightness condition set */
+						CA
+						01 00 01 00 01 00
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						80 80 80
+						00 00 00
+						00 00
+					29 00 00 00 00 00 03 B1 10 03		/* AID 0% */
+					29 00 00 00 00 00 02 B0 01
+					29 00 00 00 00 00 03 B5 BC 0A		/* ELVSS Setting:CAPS ON : acl off */
+					29 00 00 00 00 00 03 F4 BB 1E		/* VINT set */
+
+					29 01 00 00 01 00 02 F7 03			/* Gamma, LTPS(AID) update wait more 100ns */
+					29 00 00 00 00 00 02 F7 00
+
+					29 01 00 00 00 00 03 F0 A5 A5		/* TEST KEY key Disable  */
+				];
+				qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
+				qcom,panel-roi-alignment=<360 64 360 64 360 64>;
+				qcom,compression-mode = "dsc";
+				qcom,config-select = <&dsc_hd_hf4>;
+
+				dsc_hd_hf4: config_hd_hf4 {
+					qcom,lm-split = <360 360>;
+					qcom,mdss-dsc-encoders = <2>;
+					qcom,mdss-dsc-slice-height = <64>;
+					qcom,mdss-dsc-slice-width = <360>;
+					qcom,mdss-dsc-slice-per-pkt = <1>;
+					qcom,mdss-dsc-bit-per-component = <8>;
+					qcom,mdss-dsc-bit-per-pixel = <8>;
+					qcom,mdss-dsc-block-prediction-enable;
+				};
+
+			};
 		};
 	};
 };

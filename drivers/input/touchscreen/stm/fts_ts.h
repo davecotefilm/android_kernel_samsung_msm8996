@@ -67,8 +67,15 @@
 #undef FTS_SUPPORT_TA_MODE
 #undef FTS_SUPPORT_2NDSCREEN
 #undef FTS_SUPPORT_SIDE_SCROLL
-#undef FTS_SUPPORT_PARTIAL_DOWNLOAD
 #undef FTS_SUPPORT_HOVER
+
+#if defined(CONFIG_SEC_HERO2QLTE_PROJECT)
+#define FTS_SUPPORT_PARTIAL_DOWNLOAD
+#elif defined(CONFIG_SEC_POSEIDONLTE_PROJECT)
+#define FTS_SUPPORT_PARTIAL_DOWNLOAD
+#else
+#undef FTS_SUPPORT_PARTIAL_DOWNLOAD
+#endif
 
 #undef TSP_RUN_AUTOTUNE_DEFAULT
 
@@ -516,6 +523,7 @@ struct fts_ts_info {
 	bool flip_enable;
 	bool flip_state;
 	bool mainscr_disable;
+	bool run_autotune;
 
 	unsigned char lowpower_flag;
 	bool lowpower_mode;
@@ -573,6 +581,7 @@ struct fts_ts_info {
 #if defined(USE_RESET_WORK_EXIT_LOWPOWERMODE) || defined(FTS_SUPPORT_ESD_CHECK)
 	struct delayed_work reset_work;
 #endif
+	struct delayed_work work_read_nv;
 
 	unsigned int scrub_id;
 	unsigned int scrub_x;
@@ -607,6 +616,7 @@ struct fts_ts_info {
 	unsigned char o_afe_ver;
 	unsigned char afe_ver;
 #endif
+	int pat;
 
 	unsigned char data[FTS_EVENT_SIZE * FTS_FIFO_MAX];
 	unsigned char lcd_id[4];
@@ -637,11 +647,14 @@ int fts_fw_update_on_hidden_menu(struct fts_ts_info *info, int update_type);
 void fts_fw_init(struct fts_ts_info *info);
 void fts_execute_autotune(struct fts_ts_info *info);
 int fts_fw_wait_for_event(struct fts_ts_info *info, unsigned char eid);
+int fts_fw_wait_for_event_D3(struct fts_ts_info *info, unsigned char eid0, unsigned char eid1);
 int fts_fw_wait_for_specific_event(struct fts_ts_info *info, unsigned char eid0, unsigned char eid1, unsigned char eid2);
 void fts_irq_enable(struct fts_ts_info *info, bool enable);
 int fts_interrupt_set(struct fts_ts_info *info, int enable);
-void fts_set_tsp_test_result(struct fts_ts_info *info);
 int fts_get_tsp_test_result(struct fts_ts_info *info);
+#ifdef FTS_SUPPORT_PARTIAL_DOWNLOAD
+bool get_PureAutotune_status(struct fts_ts_info *info);
+#endif
 
 
 /*

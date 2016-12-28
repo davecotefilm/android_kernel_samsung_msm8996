@@ -142,6 +142,10 @@ static bool sleep_disabled;
 module_param_named(sleep_disabled,
 	sleep_disabled, bool, S_IRUGO | S_IWUSR | S_IWGRP);
 
+#ifdef CONFIG_SEC_PM
+extern int wakeup_gpio_irq_flag;
+#endif
+
 s32 msm_cpuidle_get_deep_idle_latency(void)
 {
 	return 10;
@@ -355,24 +359,23 @@ static int cpu_power_select(struct cpuidle_device *dev,
 
 		if (next_event_us) {
 			if (next_event_us < lvl_latency_us)
-				break;
+				continue;
 
 			if (((next_event_us - lvl_latency_us) < sleep_us) ||
 					(next_event_us < sleep_us))
 				next_wakeup_us = next_event_us - lvl_latency_us;
 		}
 
-		best_level = i;
-
-		if (next_event_us && next_event_us < sleep_us &&
+		if (next_wakeup_us <= residency[i]) {
+			best_level = i;
+			if (next_event_us && next_event_us < sleep_us &&
 				(mode != MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT))
-			modified_time_us
-				= next_event_us - lvl_latency_us;
-		else
-			modified_time_us = 0;
-
-		if (next_wakeup_us <= residency[i])
+				modified_time_us
+					= next_event_us - lvl_latency_us;
+			else
+				modified_time_us = 0;
 			break;
+		}
 	}
 
 	if (modified_time_us)
@@ -469,10 +472,10 @@ static int cluster_select(struct lpm_cluster *cluster, bool from_idle)
 			continue;
 
 		if (from_idle && latency_us < pwr_params->latency_us)
-			break;
+			continue;
 
 		if (sleep_us < pwr_params->time_overhead_us)
-			break;
+			continue;
 
 		if (suspend_in_progress && from_idle && level->notify_rpm)
 			continue;
@@ -480,10 +483,10 @@ static int cluster_select(struct lpm_cluster *cluster, bool from_idle)
 		if (level->notify_rpm && msm_rpm_waiting_for_ack())
 			continue;
 
-		best_level = i;
-
-		if (sleep_us <= pwr_params->max_residency)
+		if (sleep_us <= pwr_params->max_residency) {
+			best_level = i;
 			break;
+		}
 	}
 
 	return best_level;
@@ -1151,7 +1154,7 @@ static int lpm_suspend_enter(suspend_state_t state)
 	struct lpm_cpu *lpm_cpu = cluster->cpu;
 	const struct cpumask *cpumask = get_cpu_mask(cpu);
 	int idx;
-	int64_t time = ktime_to_ns(ktime_get());
+	int64_t time = 0;
 
 	for (idx = lpm_cpu->nlevels - 1; idx >= 0; idx--) {
 
@@ -1176,6 +1179,10 @@ static int lpm_suspend_enter(suspend_state_t state)
 	 */
 	clock_debug_print_enabled();
 
+#ifdef CONFIG_SEC_PM
+	wakeup_gpio_irq_flag = 1;
+#endif
+
 	if (!use_psci)
 		msm_cpu_pm_enter_sleep(cluster->cpu->levels[idx].mode, false);
 	else
@@ -1185,7 +1192,6 @@ static int lpm_suspend_enter(suspend_state_t state)
 		update_debug_pc_event(CPU_EXIT, idx, true, 0xdeaffeed,
 					false);
 
-	time = ktime_to_ns(ktime_get());
 	cluster_unprepare(cluster, cpumask, idx, false, time);
 	cpu_unprepare(cluster, idx, false);
 	return 0;

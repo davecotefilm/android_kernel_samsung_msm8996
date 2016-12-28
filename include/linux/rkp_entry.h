@@ -47,6 +47,14 @@ typedef signed char        s8;
 #define RKP_INIT	RKP_CMDID(0x0)
 #define RKP_DEF_INIT	RKP_CMDID(0x1)
 
+
+#define CFP_ROPP_INIT		RKP_CMDID(0x90)
+#define CFP_ROPP_NEW_KEY	RKP_CMDID(0x91)
+#define CFP_ROPP_NEW_KEY_REENC	RKP_CMDID(0x92)
+#define CFP_ROPP_KEY_DEC	RKP_CMDID(0x93)
+#define CFP_ROPP_RET_KEY	RKP_CMDID(0x94)
+#define CFP_JOPP_INIT		RKP_CMDID(0x98)
+
 #define RKP_INIT_MAGIC 0x5afe0001
 #define RKP_RO_BUFFER  UL(0x800000)
 
@@ -156,7 +164,6 @@ static inline u8 rkp_is_protected(u64 pa, u64 *base_addr, int type)
 	if(type && ((phys_addr >= TIMA_ROBUF_START) && (phys_addr  < (TIMA_ROBUF_START + TIMA_ROBUF_SIZE)))) {
 		return 1;	
 	}
-
 	p += (tmp);
 	rindex = index % 64;
 	if (type)

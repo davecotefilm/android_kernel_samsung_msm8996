@@ -57,8 +57,10 @@ struct adsp_data {
 	unsigned int dump_ready_flag;
 	unsigned int dump_status;
 	void* pdata;
+	bool sysfs_created[ADSP_FACTORY_SENSOR_MAX];
 };
 
+int adsp_get_sensor_data(int sensor_type);
 int adsp_factory_register(int type, struct device_attribute *attributes[]);
 int adsp_factory_unregister(int type);
 int adsp_mobeam_register(struct device_attribute *attributes[]);

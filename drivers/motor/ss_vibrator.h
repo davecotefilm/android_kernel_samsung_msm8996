@@ -22,6 +22,14 @@ enum driver_chip {
 	CHIP_ISAXXX,
 };
 
+enum freq_type {
+	freq_alert = 0,
+	freq_low,
+	freq_mid,
+	freq_high,
+	freq_0,
+};
+
 /* Error and Return value codes */
 #define VIBRATION_SUCCESS	0	/* Success */
 #define VIBRATION_FAIL		-1	/* Generic error */
@@ -29,6 +37,8 @@ enum driver_chip {
 #define VIBRATION_OFF		0
 
 #define MAX_INTENSITY		10000
+#define MAX_STRENGTH		98
+#define MAX_FREQUENCY		5
 
 #if defined(CONFIG_SEC_HEROQLTE_PROJECT)
 #define MOTOR_STRENGTH			94/*MOTOR_STRENGTH 94 %*/
@@ -53,6 +63,7 @@ int32_t g_nlra_gp_clk_n = GP_CLK_N_DEFAULT;
 int32_t g_nlra_gp_clk_d = GP_CLK_D_DEFAULT;
 int32_t g_nlra_gp_clk_pwm_mul = IMM_PWM_MULTIPLIER;
 int32_t motor_strength = MOTOR_STRENGTH;
+int32_t f_multi_freq = 0;
 int32_t motor_min_strength;
 
 #define __inp(port) ioread8(port)
@@ -145,5 +156,12 @@ static void __iomem *virt_mmss_gp1_base;
 #define HWIO_OUTM(hwiosym, mask, val)	__msmhwio_outm(hwiosym, mask, val)
 int32_t vibe_pwm_onoff(u8 onoff);
 int32_t vibe_set_pwm_freq(int intensity);
+
+#if defined(CONFIG_MOTOR_DRV_MAX77833)
+extern void max77833_vibtonz_en(bool en);
+#endif
+#if defined(CONFIG_MOTOR_DRV_MAX77854)
+extern void max77854_vibtonz_en(bool en);
+#endif
 
 #endif  /* _VIBRATOR_H */

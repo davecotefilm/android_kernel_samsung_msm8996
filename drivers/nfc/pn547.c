@@ -85,6 +85,7 @@ struct pn547_dev {
 	struct wake_lock nfc_wake_lock;
 	struct clk *nfc_clock;
 	unsigned int clk_req_gpio;
+	int i2c_probe;
 		
 #ifdef CONFIG_NFC_PN547_CLOCK_REQUEST
 	unsigned int clk_req_gpio;
@@ -492,11 +493,12 @@ static int pn547_dev_open(struct inode *inode, struct file *filp)
 						   pn547_device);
 	filp->private_data = pn547_dev;
 
-	pr_debug("%s : %d,%d\n", __func__, imajor(inode), iminor(inode));
+	pr_info("%s : %d,%d (%d)\n", __func__, imajor(inode), iminor(inode), pn547_dev->i2c_probe);
 
 	return 0;
 }
 
+static unsigned char p61_trans_acc_on = 0;
 long pn547_dev_ioctl(struct file *filp,
 			   unsigned int cmd, unsigned long arg)
 {
@@ -844,13 +846,13 @@ long pn547_dev_ioctl(struct file *filp,
 		}
 		else if(arg == 2)
 		{
-			pr_info("%s : P61_ESE_GPIO_LOW  \n", __func__);
+			pr_info("%s : P61 ESE POWER REQ LOW  \n", __func__);
 			gpio_set_value(pn547_dev->ese_pwr_req, 0);
 			msleep(60);
 		}
 		else if(arg == 3)
 		{
-			pr_info("%s : P61_ESE_GPIO_HIGH  \n", __func__);
+			pr_info("%s : P61 ESE POWER REQ HIGH  \n", __func__);
 			gpio_set_value(pn547_dev->ese_pwr_req, 1);
 		}
 		else if(arg == 4)
@@ -867,6 +869,11 @@ long pn547_dev_ioctl(struct file *filp,
 
 	case P547_SET_NFC_SERVICE_PID:
     {
+		p61_access_state_t current_state = P61_STATE_INVALID;
+		p61_get_access_state(pn547_dev, &current_state);
+        if((p61_trans_acc_on ==  1) && ((current_state & (P61_STATE_SPI|P61_STATE_SPI_PRIO)) == 0))
+            release_ese_lock(P61_STATE_WIRED);
+
         pr_info("%s : The NFC Service PID is %ld\n", __func__, arg);
         pn547_dev->nfc_service_pid = arg;
 
@@ -959,24 +966,26 @@ EXPORT_SYMBOL(pn547_dev_ioctl);
 int get_ese_lock(p61_access_state_t  p61_current_state, int timeout)
 {
 	unsigned long tempJ = msecs_to_jiffies(timeout);
-	pr_info("get_ese_lock: enter p61_current_state = %d, timeout = %d, jiffies = %lu\n"
+	pr_info("get_ese_lock: enter p61_current_state =(0x%x), timeout = %d, jiffies = %lu\n"
 			, p61_current_state, timeout, tempJ);
 	if(down_timeout(&ese_access_sema, tempJ) != 0)
 	{
 		pr_err("get_ese_lock: timeout p61_current_state = %d\n", p61_current_state);
 		return -EBUSY;
 	}
-	pr_info("get_ese_lock: exit p61_current_state = %d, timeout = %d\n"
-			, p61_current_state, timeout);
+    p61_trans_acc_on = 1;
+	pr_info("get_ese_lock: exit p61_trans_acc_on =%d, timeout = %d\n"
+			, p61_trans_acc_on, timeout);
 	return 0;
 }
 EXPORT_SYMBOL(get_ese_lock);
 
 static void release_ese_lock(p61_access_state_t  p61_current_state)
 {
-	pr_info("release_ese_lock: enter p61_current_state = %d", p61_current_state);
+	pr_info("%s: enter p61_current_state = (0x%x)\n", __func__, p61_current_state);
 	up(&ese_access_sema);
-	pr_info("release_ese_lock: exit");
+    p61_trans_acc_on = 0;
+	pr_info("%s: p61_trans_acc_on =%d exit\n", __func__, p61_trans_acc_on);
 }
 #endif
 
@@ -1503,8 +1512,9 @@ static int pn547_probe(struct i2c_client *client,
 		do {
 			ret = i2c_master_send(client, tmp, 4);
 			if (ret > 0) {
-				pr_info("%s : i2c addr=0x%X\n",
-					__func__, client->addr);
+				pr_info("%s : i2c addr(0x%X), ret(%d)\n",
+					__func__, client->addr, ret);
+				pn547_dev->i2c_probe = ret;
 				break;
 			}
 		} while (addrcnt--);
@@ -1513,8 +1523,10 @@ static int pn547_probe(struct i2c_client *client,
 			break;
 	}
 
-	if(ret <= 0)
+	if(ret <= 0) {
+		pr_info("%s : ret(%d), i2c_probe(%d)\n", __func__, ret, pn547_dev->i2c_probe);
 		client->addr = 0x2B;
+	}
 
 	gpio_set_value(pn547_dev->ven_gpio, 0);
 	gpio_set_value(pn547_dev->firm_gpio, 0); /* add */
@@ -1523,7 +1535,7 @@ static int pn547_probe(struct i2c_client *client,
 		pr_err("%s : fail to get i2c addr\n", __func__);
 		/* goto err_request_irq_failed; */
 	else
-		pr_info("%s : success\n", __func__);
+		pr_info("%s : success, i2c_probe(%d)\n", __func__, pn547_dev->i2c_probe);
 	return 0;
 
 err_request_irq_failed:

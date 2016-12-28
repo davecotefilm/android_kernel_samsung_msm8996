@@ -18,7 +18,22 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
-#include <linux/wait.h>#include <linux/delay.h>#include <linux/kernel.h>#include <linux/platform_device.h>#include <linux/mutex.h>#include <linux/module.h>#include <linux/miscdevice.h>#include <linux/gpio.h>#include <linux/slab.h>#include <linux/fs.h>#include <linux/uaccess.h>#include <linux/sec_nfc.h>#include <linux/of_gpio.h>#include <linux/miscdevice.h>
+
+
+#include <linux/wait.h>
+#include <linux/delay.h>
+#include <linux/kernel.h>
+#include <linux/platform_device.h>
+#include <linux/mutex.h>
+#include <linux/module.h>
+#include <linux/miscdevice.h>
+#include <linux/gpio.h>
+#include <linux/slab.h>
+#include <linux/fs.h>
+#include <linux/uaccess.h>
+#include <linux/sec_nfc.h>
+#include <linux/of_gpio.h>
+#include <linux/miscdevice.h>
 /*
  * Security START
  *	#include <mach/scm.h>
@@ -55,9 +70,9 @@
 
 /*	extern unsigned int system_rev;  Not using system_rev anymore	*/
 
-#undef FEATURE_SET_DEFAULT_ANT_VAL
+#define FEATURE_SET_DEFAULT_ANT_VAL 15
 
-#ifdef CONFIG_NFC_EDC_TUNING
+#if defined(CONFIG_NFC_EDC_TUNING) || defined(FEATURE_SET_DEFAULT_ANT_VAL)
 static unsigned char user_ant = 10;
 #endif
 static int felica_epc_ant_read(unsigned char *read_buff);
@@ -87,7 +102,8 @@ static struct of_device_id bu80003gul_i2c_match_table[] = {
  */
 static struct i2c_driver bu80003gul_i2c_driver = {
 	.probe = bu80003gul_i2c_probe,
-	.remove = bu80003gul_i2c_remove,
+	.remove = bu80003gul_i2c_remove,
+
 	.id_table = bu80003gul_i2c_idtable,
 	.driver = {
 				.name = BU80003GUL_I2C_NAME,
@@ -166,7 +182,8 @@ int felica_epc_reset(void)
 static int felica_epc_register(void)
 {
 	struct device *device_felica_epc;
-	int ret;
+	int ret;
+
 	dev_id_felica_epc = MKDEV(FELICA_EPC_MAJOR, FELICA_EPC_MINOR);
 	ret = alloc_chrdev_region(&dev_id_felica_epc, FELICA_EPC_BASEMINOR,
 				FELICA_EPC_MINOR_COUNT, FELICA_EPC_NAME);
@@ -182,7 +199,9 @@ static int felica_epc_register(void)
 		unregister_chrdev_region(dev_id_felica_epc, FELICA_EPC_MINOR_COUNT);
 		EPC_ERR("[MFDD] %s ERROR(cdev_add), ret=[%d]", __func__, ret);
 		return -EIO;
-	}
+	}
+
+
 	eeprom_class = class_create(THIS_MODULE, "felica_eeprom");
 	if (IS_ERR(eeprom_class)) {
 		EPC_ERR("[MFDD] %s ERROR(class_create)", __func__);
@@ -202,7 +221,8 @@ static int felica_epc_register(void)
 	EPC_DEBUG("[MFDD] %s END, major=[%d], minor=[%d]", __func__,
 			 MAJOR(dev_id_felica_epc), MINOR(dev_id_felica_epc));
 
-	return 0;
+	return 0;
+
 }
 
 static void felica_epc_deregister(void)
@@ -357,6 +377,8 @@ static ssize_t felica_epc_write(struct file *file, const char __user *data,
 		return -EFAULT;
 	}
 
+	pr_info("%s, ant:%02x\n", __func__, ant);
+
 	ret = felica_epc_ant_write(ant);
 	if (ret < 0) {
 		EPC_ERR("[MFDD] %s felica_epc_ant_write fail, ret=[%d]",
@@ -427,28 +449,44 @@ static int bu80003gul_i2c_probe(struct i2c_client *client,
 	}
 
 #ifdef FEATURE_SET_DEFAULT_ANT_VAL
-	/* set default value temporarily */
-	ret = felica_epc_ant_write(FEATURE_SET_DEFAULT_ANT_VAL);
-	if (ret < 0) {
-		EPC_ERR("[MFDD] %s felica_epc_ant_write fail, ret=[%d]",
-				__func__, ret);
-		return -EFAULT;
-	}
+        ret = felica_epc_ant_read(&user_ant);
+        if (ret < 0) {
+                EPC_ERR("[MFDD] %s felica_epc_ant_read fail, ret=[%d]",
+                                __func__, ret);
+                user_ant = 10;
+                return -EFAULT;
+        }
+        pr_info("%s : felica_ant default setting: %d\n", __func__, user_ant);
+        if (user_ant == 63) {
+		pr_info("%s: set default value to %d\n", __func__, FEATURE_SET_DEFAULT_ANT_VAL);
+                /* set default value temporarily */
+                ret = felica_epc_ant_write(FEATURE_SET_DEFAULT_ANT_VAL | (1<<7));
+                if (ret < 0) {
+                        EPC_ERR("[MFDD] %s felica_epc_ant_write fail, ret=[%d]",
+                                        __func__, ret);
+                                return -EFAULT;
+                }
+        }
 #endif
+
+
 #ifdef CONFIG_NFC_EDC_TUNING
         ret = felica_epc_reset();
         if (ret < 0) {
                 EPC_ERR("[MFDD] %s felica_epc_reset fail, ret=[%d]",
                                 __func__, ret);
         }
-	ret = felica_epc_ant_read(&user_ant);
-	if (ret < 0) {
-		EPC_ERR("[MFDD] %s felica_epc_ant_read fail, ret=[%d]",
-				__func__, ret);
-		user_ant = 10;
-		return -EFAULT;
-	}
-	pr_info("%s : felica_ant : %d\n", __func__, user_ant);
+#endif
+
+#if defined(CONFIG_NFC_EDC_TUNING) || defined(FEATURE_SET_DEFAULT_ANT_VAL)
+       ret = felica_epc_ant_read(&user_ant);
+        if (ret < 0) {
+                EPC_ERR("[MFDD] %s felica_epc_ant_read fail, ret=[%d]",
+                                __func__, ret);
+                user_ant = 10;
+                return -EFAULT;
+        }
+        pr_info("%s : felica_ant : %d\n", __func__, user_ant);
 #endif
 
 	EPC_INFO("[MFDD] %s END", __func__);
@@ -479,8 +517,10 @@ static int __init bu80003gul_init(void)
 static void __exit bu80003gul_exit(void)
 {
 	return i2c_del_driver(&bu80003gul_i2c_driver);
-}
+}
+
 module_init(bu80003gul_init);
-module_exit(bu80003gul_exit);
+module_exit(bu80003gul_exit);
+
 MODULE_DESCRIPTION("Samsung sec_nfc bu80003gul driver");
 MODULE_LICENSE("GPL");

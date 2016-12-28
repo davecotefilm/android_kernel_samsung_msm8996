@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -734,7 +734,6 @@ static int ngd_bulk_wr(struct slim_controller *ctrl, u8 la, u8 mt, u8 mc,
 	struct msm_slim_ctrl *dev = slim_get_ctrldata(ctrl);
 	int i, ret;
 	struct msm_slim_endp *endpoint = &dev->tx_msgq;
-	struct sps_pipe *pipe = endpoint->sps;
 	u32 *header;
 	DECLARE_COMPLETION_ONSTACK(done);
 
@@ -750,7 +749,6 @@ static int ngd_bulk_wr(struct slim_controller *ctrl, u8 la, u8 mt, u8 mc,
 		msm_slim_put_ctrl(dev);
 		return -EREMOTEIO;
 	}
-
 	if (!pm_runtime_enabled(dev->dev) && dev->state == MSM_CTRL_ASLEEP) {
 		mutex_unlock(&dev->tx_lock);
 		ret = ngd_slim_runtime_resume(dev->dev);
@@ -842,8 +840,8 @@ static int ngd_bulk_wr(struct slim_controller *ctrl, u8 la, u8 mt, u8 mc,
 		goto retpath;
 	}
 
-	ret = sps_transfer_one(pipe, dev->bulk.wr_dma, dev->bulk.size, NULL,
-				SPS_IOVEC_FLAG_EOT);
+	ret = sps_transfer_one(endpoint->sps, dev->bulk.wr_dma, dev->bulk.size,
+						NULL, SPS_IOVEC_FLAG_EOT);
 	if (ret) {
 		SLIM_WARN(dev, "sps transfer one returned error:%d", ret);
 		goto retpath;
@@ -1696,7 +1694,6 @@ static int ngd_slim_probe(struct platform_device *pdev)
 	pm_runtime_set_suspended(dev->dev);
 	pm_runtime_enable(dev->dev);
 
-	dev->dsp.nb.priority = 4;
 	dev->dsp.nb.notifier_call = dsp_ssr_notify_cb;
 	dev->dsp.ssr = subsys_notif_register_notifier("adsp",
 						&dev->dsp.nb);

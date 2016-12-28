@@ -3,7 +3,7 @@
  *
  * This code is based on drivers/scsi/ufs/ufshcd.h
  * Copyright (C) 2011-2013 Samsung India Software Operations
- * Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * Authors:
  *	Santosh Yaraganavi <santosh.sy@samsung.com>
@@ -78,6 +78,8 @@
 #define UFSHCD_DRIVER_VERSION "0.3"
 
 #define UFS_BIT(x)	BIT(x)
+
+#define UFSHCD_RESUME_STEP_DEBUGGING
 
 struct ufs_hba;
 
@@ -344,7 +346,11 @@ struct ufs_hba_variant_ops {
 
 /**
  * struct ufs_hba_crypto_variant_ops - variant specific crypto callbacks
- * @crypto_engine_cfg: configure cryptographic engine according to tag parameter
+ * @crypto_engine_cfg_start: start configuring cryptographic engine
+ *							 according to tag
+ *							 parameter
+ * @crypto_engine_cfg_end: end configuring cryptographic engine
+ *						   according to tag parameter
  * @crypto_engine_eh: cryptographic engine error handling.
  *                Return true is it detects an error, false on
  *                success
@@ -356,7 +362,9 @@ struct ufs_hba_variant_ops {
  *                         the cryptographic engine
  */
 struct ufs_hba_crypto_variant_ops {
-	int	(*crypto_engine_cfg)(struct ufs_hba *, unsigned int);
+	int	(*crypto_engine_cfg_start)(struct ufs_hba *, unsigned int);
+	int	(*crypto_engine_cfg_end)(struct ufs_hba *, struct ufshcd_lrb *,
+			struct request *);
 	int	(*crypto_engine_reset)(struct ufs_hba *);
 	int	(*crypto_engine_eh)(struct ufs_hba *);
 	int	(*crypto_engine_get_err)(struct ufs_hba *);
@@ -901,6 +909,11 @@ struct ufs_hba {
 	char unique_number[UFS_UN_MAX_DIGITS];
  	u16 manufacturer_id;
 	u8 lifetime;
+#if defined(UFSHCD_RESUME_STEP_DEBUGGING)
+	u32 	resume_fail_step;
+	ktime_t	resume_fail_time;
+	int 	resume_fail_ret;
+#endif
 };
 
 /* Returns true if clocks can be gated. Otherwise false */
@@ -1247,12 +1260,24 @@ static inline void ufshcd_vops_remove_debugfs(struct ufs_hba *hba)
 }
 #endif
 
-static inline int ufshcd_vops_crypto_engine_cfg(struct ufs_hba *hba,
+static inline int ufshcd_vops_crypto_engine_cfg_start(struct ufs_hba *hba,
 						unsigned int task_tag)
 {
 	if (hba->var && hba->var->crypto_vops &&
-	    hba->var->crypto_vops->crypto_engine_cfg)
-		return hba->var->crypto_vops->crypto_engine_cfg(hba, task_tag);
+	    hba->var->crypto_vops->crypto_engine_cfg_start)
+		return hba->var->crypto_vops->crypto_engine_cfg_start
+				(hba, task_tag);
+	return 0;
+}
+
+static inline int ufshcd_vops_crypto_engine_cfg_end(struct ufs_hba *hba,
+						struct ufshcd_lrb *lrbp,
+						struct request *req)
+{
+	if (hba->var && hba->var->crypto_vops &&
+	    hba->var->crypto_vops->crypto_engine_cfg_end)
+		return hba->var->crypto_vops->crypto_engine_cfg_end
+				(hba, lrbp, req);
 	return 0;
 }
 
@@ -1310,5 +1335,39 @@ static ssize_t ufs_##name##_show (struct device *dev, struct device_attribute *a
 	return sprintf(buf, fmt, args);						\
 }										\
 static DEVICE_ATTR(name, S_IRUGO, ufs_##name##_show, NULL)
+
+enum ufshcd_resume_fail_step {
+	UFSHCD_RESUME_START,
+	UFSHCD_CLK_EN,
+	UFSHCD_SET_HPM,
+	UFSHCD_VENDOR_RESUME,
+	UFSHCD_HIBERN8_EXIT,
+	UFSHCD_RE_LINK,
+	UFSHCD_SET_LINK_ACTIVE,
+	UFSHCD_SET_DEV_ACTIVE_PWR_MODE,
+	UFSHCD_EN_AUTO_BKOPS,
+	UFSHCD_URGENT_BKOPS,
+	UFSHCD_RESUME_DONE,
+	UFSHCD_SUSPEND_DONE,
+};
+
+#if defined(UFSHCD_RESUME_STEP_DEBUGGING)
+static inline void ufshcd_resume_fail_check(struct ufs_hba *hba,
+		enum ufshcd_resume_fail_step step, int ret)
+{
+	if (hba->resume_fail_ret)
+		return;
+
+	hba->resume_fail_step |= BIT(step);
+	hba->resume_fail_time = ktime_get();
+	hba->resume_fail_ret = ret;
+}
+#else
+static inline void ufshcd_resume_fail_check(struct ufs_hba *hba,
+		                enum ufshcd_resume_fail_step step, int ret)
+{
+	return;
+}
+#endif
 
 #endif /* End of Header */

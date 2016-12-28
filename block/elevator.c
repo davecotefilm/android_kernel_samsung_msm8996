@@ -542,7 +542,7 @@ void elv_bio_merged(struct request_queue *q, struct request *rq,
 #ifdef CONFIG_PM_RUNTIME
 static void blk_pm_requeue_request(struct request *rq)
 {
-	if (rq->q->dev && !(rq->cmd_flags & REQ_PM))
+	if (rq->q->dev && !(rq->cmd_flags & REQ_PM) && rq->q->nr_pending)
 		rq->q->nr_pending--;
 }
 
@@ -740,6 +740,8 @@ void elv_completed_request(struct request_queue *q, struct request *rq)
 	 */
 	if (blk_account_rq(rq)) {
 		q->in_flight[rq_is_sync(rq)]--;
+		if (!queue_in_flight(q))
+			q->in_flight_time += ktime_us_delta(ktime_get(), q->in_flight_stamp);
 		if ((rq->cmd_flags & REQ_SORTED) &&
 		    e->type->ops.elevator_completed_req_fn)
 			e->type->ops.elevator_completed_req_fn(q, rq);

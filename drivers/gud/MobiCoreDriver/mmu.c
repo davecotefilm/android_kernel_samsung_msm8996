@@ -259,10 +259,9 @@ static inline int map_buffer(struct task_struct *task, const void *data,
 
 			/* Buffer was allocated in user space */
 			down_read(&task->mm->mmap_sem);
-			gup_ret = __get_user_pages(task, task->mm,
+			gup_ret = get_user_pages(task, task->mm,
 						 (uintptr_t)reader, pages_nr,
-						 FOLL_TOUCH | FOLL_GET | FOLL_WRITE | FOLL_CMA,
-						 pages, NULL, 0);
+						 1, 0, pages, 0);
 			up_read(&task->mm->mmap_sem);
 			if (gup_ret < 0) {
 				ret = gup_ret;
@@ -338,7 +337,7 @@ static inline int map_buffer(struct task_struct *task, const void *data,
 					goto end;
 				}
 #endif
-				*pte = phys;
+				*pte = (u32)phys;
 				*pte |= pte_flags_32;
 			}
 		}
@@ -361,7 +360,7 @@ static inline void unmap_buffer(struct tee_mmu *mmu_table)
 		goto end;
 
 	/* Release all locked user space pages */
-	for (t = 0; t < mmu_table->l2_tables_nr; t++) {
+	for (t = 0; t < (size_t)mmu_table->l2_tables_nr; t++) {
 		if (g_ctx.f_lpae) {
 			u64 *pte = mmu_table->l2_tables[t].ptes_64;
 			int i;

@@ -62,7 +62,7 @@
 static uint32_t lmk_count = 0;
 #endif
 
-#ifdef CONFIG_SEC_OOM_KILLER
+#ifdef CONFIG_SEC_TIMEOUT_LOW_MEMORY_KILLER
 #define MULTIPLE_OOM_KILLER
 #endif
 
@@ -451,7 +451,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 }
 
 /*
- * CONFIG_SEC_OOM_KILLER : klaatu@sec
+ * CONFIG_SEC_TIMEOUT_LOW_MEMORY_KILLER
  *
  * The way to select victim by oom-killer provided by
  * linux kernel is totally different from android policy.
@@ -459,10 +459,8 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
  * as android does when LMK is invoked.
  *
 */
-#ifdef CONFIG_SEC_OOM_KILLER
-
-static int android_oom_handler(struct notifier_block *nb,
-				      unsigned long val, void *data)
+#ifdef CONFIG_SEC_TIMEOUT_LOW_MEMORY_KILLER
+int timeout_lmk(void)
 {
 	struct task_struct *tsk;
 #ifdef MULTIPLE_OOM_KILLER
@@ -470,7 +468,6 @@ static int android_oom_handler(struct notifier_block *nb,
 #else
 	struct task_struct *selected = NULL;
 #endif
-	int rem = 0;
 	int tasksize;
 	int i;
 	int min_score_adj = OOM_SCORE_ADJ_MAX + 1;
@@ -479,16 +476,17 @@ static int android_oom_handler(struct notifier_block *nb,
 	int selected_oom_score_adj[OOM_DEPTH] = {OOM_ADJUST_MAX,};
 	int all_selected_oom = 0;
 	int max_selected_oom_idx = 0;
+	int is_exist_oom_task;
 #else
 	int selected_tasksize = 0;
 	int selected_oom_score_adj;
 #endif
 	static DEFINE_RATELIMIT_STATE(oom_rs, DEFAULT_RATELIMIT_INTERVAL/5, 1);
 
-	unsigned long *freed = data;
+	unsigned long freed = 0;
 
 	/* show status */
-	pr_warning("%s invoked Android-oom-killer: "
+	pr_warning("%s invoked timeout LMK: "
 		"oom_score_adj=%d\n",
 		current->comm,
 		current->signal->oom_score_adj);
@@ -510,7 +508,7 @@ static int android_oom_handler(struct notifier_block *nb,
 		struct task_struct *p;
 		int oom_score_adj;
 #ifdef MULTIPLE_OOM_KILLER
-		int is_exist_oom_task = 0;
+		is_exist_oom_task = 0;
 #endif
 
 		if (tsk->flags & PF_KTHREAD ||
@@ -531,7 +529,7 @@ static int android_oom_handler(struct notifier_block *nb,
 		if (tasksize <= 0)
 			continue;
 
-		lowmem_print(2, "oom: ------ %d (%s), adj %d, size %d\n",
+		lowmem_print(2, "timeout: ------ %d (%s), adj %d, size %d\n",
 			     p->pid, p->comm, oom_score_adj, tasksize);
 #ifdef MULTIPLE_OOM_KILLER
 		if (all_selected_oom < OOM_DEPTH) {
@@ -566,7 +564,7 @@ static int android_oom_handler(struct notifier_block *nb,
 				}
 			}
 
-			lowmem_print(2, "oom: max_selected_oom_idx(%d) select %d (%s), adj %d, \
+			lowmem_print(2, "timeout: max_selected_oom_idx(%d) select %d (%s), adj %d, \
 					size %d, to kill\n",
 				max_selected_oom_idx, p->pid, p->comm, oom_score_adj, tasksize);
 		}
@@ -581,21 +579,20 @@ static int android_oom_handler(struct notifier_block *nb,
 		selected = p;
 		selected_tasksize = tasksize;
 		selected_oom_score_adj = oom_score_adj;
-		lowmem_print(2, "oom: select %d (%s), adj %d, size %d, to kill\n",
+		lowmem_print(2, "timeout: select %d (%s), adj %d, size %d, to kill\n",
 			     p->pid, p->comm, oom_score_adj, tasksize);
 #endif
 	}
 #ifdef MULTIPLE_OOM_KILLER
 	for (i = 0; i < OOM_DEPTH; i++) {
 		if (selected[i]) {
-			lowmem_print(1, "oom: send sigkill to %d (%s), adj %d,\
+			lowmem_print(1, "timeout: send sigkill to %d (%s), adj %d,\
 				     size %d\n",
 				     selected[i]->pid, selected[i]->comm,
 				     selected_oom_score_adj[i],
 				     selected_tasksize[i]);
 			send_sig(SIGKILL, selected[i], 0);
-			rem -= selected_tasksize[i];
-			*freed += (unsigned long)selected_tasksize[i];
+			freed += (unsigned long)selected_tasksize[i];
 #ifdef OOM_COUNT_READ
 			oom_count++;
 #endif
@@ -603,13 +600,12 @@ static int android_oom_handler(struct notifier_block *nb,
 	}
 #else
 	if (selected) {
-		lowmem_print(1, "oom: send sigkill to %d (%s), adj %d, size %d\n",
+		lowmem_print(1, "timeout: send sigkill to %d (%s), adj %d, size %d\n",
 			     selected->pid, selected->comm,
 			     selected_oom_score_adj, selected_tasksize);
 		send_sig(SIGKILL, selected, 0);
 		set_tsk_thread_flag(selected, TIF_MEMDIE);
-		rem -= selected_tasksize;
-		*freed += (unsigned long)selected_tasksize;
+		freed += (unsigned long)selected_tasksize;
 #ifdef OOM_COUNT_READ
 		oom_count++;
 #endif
@@ -617,14 +613,14 @@ static int android_oom_handler(struct notifier_block *nb,
 #endif
 	read_unlock(&tasklist_lock);
 
-	lowmem_print(2, "oom: get memory %lu", *freed);
-	return rem;
+	lowmem_print(2, "timeout: get memory %lu", freed);
+#ifdef MULTIPLE_OOM_KILLER
+	return is_exist_oom_task ? 1 : 0;
+#else
+	return selected ? 1 : 0;
+#endif
 }
-
-static struct notifier_block android_oom_notifier = {
-	.notifier_call = android_oom_handler,
-};
-#endif /* CONFIG_SEC_OOM_KILLER */
+#endif /* CONFIG_SEC_TIMEOUT_LOW_MEMORY_KILLER */
 
 static struct shrinker lowmem_shrinker = {
 	.scan_objects = lowmem_scan,
@@ -636,9 +632,6 @@ static int __init lowmem_init(void)
 {
 	register_shrinker(&lowmem_shrinker);
 	vmpressure_notifier_register(&lmk_vmpr_nb);
-#ifdef CONFIG_SEC_OOM_KILLER
-	register_oom_notifier(&android_oom_notifier);
-#endif
 	return 0;
 }
 

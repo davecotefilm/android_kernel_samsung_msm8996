@@ -29,10 +29,52 @@ dtb-$(CONFIG_SEC_HERO2QLTE_PROJECT) += msm8996-sec-hero2qlte-r00.dtb \
 			 msm8996-sec-hero2qlte-r13.dtb \
 			 msm8996-sec-hero2qlte-r15.dtb
 
+dtb-$(CONFIG_SEC_POSEIDONLTE_PROJECT) += msm8996-sec-poseidonlte-r00.dtb \
+			msm8996-sec-poseidonlte-r01.dtb \
+			msm8996-sec-poseidonlte-r04.dtb
+
 dtb-$(CONFIG_SEC_AEROQLTE_PROJECT) += msm8996-sec-aeroqlte-r00.dtb \
 			msm8996-sec-aeroqlte-r01.dtb \
 			msm8996-sec-aeroqlte-r02.dtb \
 			msm8996-sec-aeroqlte-r03.dtb
+
+dtb-$(CONFIG_SEC_HERO6LTE_PROJECT) += msm8996-sec-hero6lte-chn-r00.dtb \
+			msm8996-sec-hero6lte-chn-r02.dtb
+
+dtb-$(CONFIG_SEC_GRACEQLTE_PROJECT) += msm8996-sec-graceqlte-r00.dtb \
+			msm8996-sec-graceqlte-r01.dtb \
+			msm8996-sec-graceqlte-r02.dtb \
+			msm8996-sec-graceqlte-r03.dtb \
+			msm8996-sec-graceqlte-r05.dtb \
+			msm8996-sec-graceqlte-r06.dtb \
+			msm8996-sec-graceqlte-r08.dtb \
+			msm8996-sec-graceqlte-r09.dtb
+
+ifeq ($(filter y,$(CONFIG_MACH_GRACEQLTE_CHNZC)),y)
+dtb-y = msm8996-sec-graceqlte-chn-r02.dtb \
+			msm8996-sec-graceqlte-chn-r03.dtb \
+			msm8996-sec-graceqlte-chn-r06.dtb \
+			msm8996-sec-graceqlte-chn-r09.dtb
+endif
+
+ifeq ($(filter y,$(CONFIG_MACH_GRACEQLTE_CHNZH)),y)
+dtb-y = msm8996-sec-graceqlte-chn-r02.dtb \
+			msm8996-sec-graceqlte-chn-r03.dtb \
+			msm8996-sec-graceqlte-chn-r06.dtb \
+			msm8996-sec-graceqlte-chnzh-r09.dtb
+endif
+
+ifeq ($(filter y,$(CONFIG_MACH_GRACEQLTE_DCM) $(CONFIG_MACH_GRACEQLTE_KDI)),y)
+dtb-y = msm8996-sec-graceqlte-jpn-r02.dtb \
+			msm8996-sec-graceqlte-jpn-r03.dtb \
+			msm8996-sec-graceqlte-jpn-r06.dtb \
+			msm8996-sec-graceqlte-jpn-r09.dtb
+endif
+
+dtb-$(CONFIG_SEC_VEYRONLTE_PROJECT) += msm8996-sec-veyronlte-ctc-r00.dtb \
+			msm8996-sec-veyronlte-ctc-r01.dtb
+
+dtb-$(CONFIG_SEC_GTS2LLTE_PROJECT) += msm8996-sec-gts2llte-r00.dtb
 
 ifeq ($(filter y,$(CONFIG_MACH_HEROQLTE_DCM) $(CONFIG_MACH_HEROQLTE_KDI)),y)
 dtb-y = msm8996-sec-heroqlte-jpn-r00.dtb \

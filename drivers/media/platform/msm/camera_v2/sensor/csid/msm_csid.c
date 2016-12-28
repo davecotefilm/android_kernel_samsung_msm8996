@@ -479,7 +479,7 @@ static int msm_csid_init(struct csid_device *csid_dev, uint32_t *csid_version)
 		goto ioremap_fail;
 	}
 
-	pr_info("%s: CSID_VERSION = 0x%x\n", __func__,
+	CDBG("%s: CSID_VERSION = 0x%x\n", __func__,
 		csid_dev->ctrl_reg->csid_reg.csid_version);
 	/* power up */
 	rc = msm_camera_config_vreg(&csid_dev->pdev->dev, csid_dev->csid_vreg,
@@ -616,7 +616,7 @@ static int msm_csid_release(struct csid_device *csid_dev)
 		return -EINVAL;
 	}
 
-	pr_err("%s:%d, hw_version = 0x%x\n", __func__, __LINE__,
+	CDBG("%s:%d, hw_version = 0x%x\n", __func__, __LINE__,
 		csid_dev->hw_version);
 
 	irq = msm_camera_io_r(csid_dev->base +

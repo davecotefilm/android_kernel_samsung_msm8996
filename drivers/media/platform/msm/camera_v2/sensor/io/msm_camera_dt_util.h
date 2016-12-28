@@ -30,6 +30,18 @@ enum check_fw {
 	CHECK_COMPANION_FW,
 };
 
+
+enum cam_sub_type {
+	SUB_DEVICE_TYPE_SENSOR = 1,
+	SUB_DEVICE_TYPE_EEPROM,
+	SUB_DEVICE_TYPE_FLASH,
+	SUB_DEVICE_TYPE_MAX,
+};
+
+#define NOW_POWER_ON 0x1<<SUB_DEVICE_TYPE_MAX
+#define NOW_POWER_OFF 0x0
+#define NO_POWER_OFF 0xFF
+
 int msm_camera_write_sysfs(char* path, const char* data, uint32_t data_size);
 int msm_camera_fw_check(const char read_fw_crc, uint8_t index);
 #endif
@@ -64,21 +76,13 @@ int msm_camera_get_dt_camera_info(struct device_node *of_node, char *buf);
 
 int msm_camera_power_up(struct msm_camera_power_ctrl_t *ctrl,
 	enum msm_camera_device_type_t device_type,
-	struct msm_camera_i2c_client *sensor_i2c_client);
+	struct msm_camera_i2c_client *sensor_i2c_client,
+	uint32_t is_secure, int sub_device);
 
 int msm_camera_power_down(struct msm_camera_power_ctrl_t *ctrl,
 	enum msm_camera_device_type_t device_type,
-	struct msm_camera_i2c_client *sensor_i2c_client);
-
-#if defined(CONFIG_SAMSUNG_QUICK_SWITCHING)
-int msm_camera_power_up_adc(struct msm_camera_power_ctrl_t *ctrl,
-	enum msm_camera_device_type_t device_type,
-	struct msm_camera_i2c_client *sensor_i2c_client, int adc_mode);
-
-int msm_camera_power_down_adc(struct msm_camera_power_ctrl_t *ctrl,
-	enum msm_camera_device_type_t device_type,
-	struct msm_camera_i2c_client *sensor_i2c_client, int adc_mode);
-#endif
+	struct msm_camera_i2c_client *sensor_i2c_client,
+	uint32_t is_secure, int sub_device);
 
 int msm_camera_fill_vreg_params(struct camera_vreg_t *cam_vreg,
 	int num_vreg, struct msm_sensor_power_setting *power_setting,

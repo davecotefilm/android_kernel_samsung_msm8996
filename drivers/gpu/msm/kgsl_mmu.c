@@ -452,6 +452,27 @@ kgsl_mmu_detach_pagetable(struct kgsl_pagetable *pagetable)
 	pagetable_remove_sysfs_objects(pagetable);
 }
 
+int
+kgsl_mmu_get_ptname_from_ptbase(struct kgsl_mmu *mmu, u64 pt_base)
+{
+	struct kgsl_pagetable *pt;
+	int ptid = -1;
+
+	if (!mmu->mmu_ops)
+		return KGSL_MMU_GLOBAL_PT;
+	spin_lock(&kgsl_driver.ptlock);
+	list_for_each_entry(pt, &kgsl_driver.pagetable_list, list) {
+		if (kgsl_mmu_pagetable_get_ttbr0(pt) == pt_base) {
+			ptid = (int) pt->name;
+			break;
+		}
+	}
+	spin_unlock(&kgsl_driver.ptlock);
+
+	return ptid;
+}
+EXPORT_SYMBOL(kgsl_mmu_get_ptname_from_ptbase);
+
 struct kgsl_pagetable *kgsl_mmu_get_pt_from_ptname(struct kgsl_mmu *mmu,
 						int ptname)
 {
@@ -722,7 +743,6 @@ kgsl_mmu_map(struct kgsl_pagetable *pagetable,
 	ret = pagetable->pt_ops->mmu_map(pagetable, memdesc);
 
 	if (ret == 0) {
-		//printk("kgsl %s %d ret=%d\n",__func__, __LINE__, ret);
 		KGSL_STATS_ADD(size, &pagetable->stats.mapped,
 			&pagetable->stats.max_mapped);
 

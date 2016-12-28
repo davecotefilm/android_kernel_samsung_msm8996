@@ -73,10 +73,8 @@ extern struct OtherLine_ParseDataList a2_line_data;
     a2 00
 */
 
-#define S6E3HF4_AMB526JS01_A3_LINE 0x01
-#define S6E3HF4_AMB526JS01_A2_LINE 0x00
-#define OTHERLINE_DEALY 900 /*ms*/
-#define OTHERLINE_CNT 70
+#define S6E3HF4_AMB526JS01_A3_LINE 0x01 /*BASIC_FB_PANLE_TYPE*/
+#define S6E3HF4_AMB526JS01_A2_LINE 0x00 /*NEW_FB_PANLE_TYPE*/
 #define LATEST_PANLE_REV 'M'
 
 struct smartdim_conf *smart_get_conf_S6E3HF4_AMB526JS01(void);

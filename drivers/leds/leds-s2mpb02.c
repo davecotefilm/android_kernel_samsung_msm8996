@@ -7,7 +7,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  *
- *  This driver is based on leds-max77804.c
+ * This driver is based on leds-max77804.c
  */
 
 #include <linux/kernel.h>
@@ -23,6 +23,8 @@
 #include <linux/leds-s2mpb02.h>
 #include <linux/ctype.h>
 #include <soc/qcom/camera2.h>
+#include <linux/debugfs.h>
+#include <linux/gpio.h>
 
 extern struct class *camera_class; /*sys/class/camera*/
 
@@ -41,6 +43,9 @@ struct msm_pinctrl_info g_led_pinctrl_info;
 #define S2MPB02_REG_FLED_CUR S2MPB02_REG_FLED_CUR2
 #define S2MPB02_REG_FLED_TIME S2MPB02_REG_FLED_TIME2
 #endif
+
+//#define DEBUG_READ_REGISTER //To dump register values with /sys/kernel/debug/s2mpb02-led-regs
+//#define DEBUG_WRITE_REGISTER //To write register with sysfs
 
 struct s2mpb02_led_data {
 	struct led_classdev led;
@@ -63,6 +68,59 @@ static u8 leds_shift[S2MPB02_LED_MAX] = {
 	4,
 	0,
 };
+
+#if defined(DEBUG_READ_REGISTER)
+#if 0
+static void print_all_reg_value(struct i2c_client *client)
+{
+	int ret;
+	u8 value;
+	u8 i;
+
+	for (i = 0; i <= S2MPB02_REG_LDO_DSCH3; i++) {
+		ret = s2mpb02_read_reg(client, i, &value);
+		if (unlikely(ret < 0)) {
+			pr_err("[s2mpb02-LED][%s] read failed", __func__);
+		}
+		pr_err("[s2mpb02-LED] register(%x) = %x\n", i, value);
+		value = 0;
+	}
+}
+#endif
+static int s2mpb02_debugfs_show(struct seq_file *s, void *data)
+{
+	struct s2mpb02_dev *ldata = s->private;
+	u8 reg;
+	u8 reg_data;
+	int ret;
+
+	seq_printf(s, "s2mpb02 IF PMIC :\n");
+	seq_printf(s, "=============\n");
+	for (reg = 0; reg <= S2MPB02_REG_LDO_DSCH3; reg++) {
+		ret = s2mpb02_read_reg(ldata->i2c, reg, &reg_data);
+		if (unlikely(ret < 0)) {
+			pr_err("[s2mpb02-LED][%s] read failed", __func__);
+		}
+		seq_printf(s, "0x%02x:\t0x%02x\n", reg, reg_data);
+	}
+	//print_all_reg_value(ldata->i2c);
+	seq_printf(s, "\n");
+
+	return 0;
+}
+
+static int s2mpb02_debugfs_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, s2mpb02_debugfs_show, inode->i_private);
+}
+
+static const struct file_operations s2mpb02_debugfs_fops = {
+	.open			= s2mpb02_debugfs_open,
+	.read			= seq_read,
+	.llseek 		= seq_lseek,
+	.release		= single_release,
+};
+#endif
 
 static int s2mpb02_led_pinctrl_config(bool on){
 	int ret = 0;
@@ -95,7 +153,7 @@ static int s2mpb02_led_pinctrl_config(bool on){
 }
 
 static int s2mpb02_set_bits(struct i2c_client *client, const u8 reg,
-			     const u8 mask, const u8 inval)
+				 const u8 mask, const u8 inval)
 {
 	int ret;
 	u8 value;
@@ -217,8 +275,12 @@ static int s2mpb02_led_setup(struct s2mpb02_led_data *led_data)
 				  data->timeout << leds_shift[id], leds_mask[id]);
 
 	value = s2mpb02_led_get_en_value(led_data, 0);
-	ret = s2mpb02_update_reg(led_data->i2c,
+	ret |= s2mpb02_update_reg(led_data->i2c,
 				S2MPB02_REG_FLED_CTRL1, value, S2MPB02_FLED_ENABLE_MODE_MASK);
+
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+	ret |= s2mpb02_ir_led_init();
+#endif
 
 	return ret;
 }
@@ -293,28 +355,180 @@ int s2mpb02_led_en(int mode, int onoff)
 }
 EXPORT_SYMBOL(s2mpb02_led_en);
 
+#ifdef DEBUG_WRITE_REGISTER
+ssize_t s2mpb02_write(struct device *dev,
+			struct device_attribute *attr, const char *buf,
+			size_t count)
+{
+	unsigned int value	= 0;
+	unsigned char reg = 0;
+	unsigned char data = 0;
+
+	if(buf == NULL || kstrtouint(buf, 16, &value)) {
+		pr_err("[%s] error buf is NULL\n", __func__);
+		return -1;
+	}
+
+	reg = value >> 8;
+	data = value & 0xFF;
+	pr_info("[%s] reg: %x, data: %x\n", __func__, reg, data);
+
+	s2mpb02_write_reg(global_led_datas[0]->i2c, reg, data);
+
+	return count;
+}
+static DEVICE_ATTR(s2mpb02_cam_reg, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH,
+	NULL, s2mpb02_write);
+#endif
+
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+int s2mpb02_ir_led_init(void)
+{
+	int ret = 0;
+
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_CTRL2, 0x38);
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_CUR2, 0xAF);
+
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_TIME2, 0x34);
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_TIME2, 0x35);
+
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_IRON1, 0x19);
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_IRON2, 0x0B);
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_IRD1, 0x00);
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_IRD2, 0X2C);
+
+	return ret;
+}
+EXPORT_SYMBOL(s2mpb02_ir_led_init);
+
+int s2mpb02_ir_led_current(int32_t current_value)
+{
+	int ret = 0;
+	unsigned int value	= current_value - 1;
+	unsigned char data = 0;
+
+	pr_info("[%s] led current value : %u\n", __func__, value);
+
+	data = ((value & 0x0F) << 4) | 0x0F;
+
+	ret = s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_CUR2, data);
+	if (ret < 0)
+		pr_err("[%s] i2c write error", __func__);
+
+	return ret;
+}
+EXPORT_SYMBOL(s2mpb02_ir_led_current);
+
+int s2mpb02_ir_led_pulse_width(int32_t width)
+{
+	unsigned int value	= width;
+	unsigned char iron1 = 0;
+	unsigned char iron2 = 0;
+	int ret = 0;
+
+	pr_info("[%s] led pulse_width value : %u\n", __func__, value);
+
+	iron1 = (value >> 2) & 0xFF;
+	iron2 = ((value & 0x03) << 6) | 0x0B;
+
+	pr_info("[%s] IRON1(0x%02x), IRON2(0x%02x)\n", __func__, iron1, iron2);
+
+	/* set 0x18, 0x19 */
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_IRON1, iron1);
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_IRON2, iron2);
+	if (ret < 0)
+		pr_err("[%s] i2c write error", __func__);
+
+	return ret;
+
+}
+EXPORT_SYMBOL(s2mpb02_ir_led_pulse_width);
+
+int s2mpb02_ir_led_pulse_delay(int32_t delay)
+{
+	unsigned int value	= delay;
+	unsigned char ird1 = 0;
+	unsigned char ird2 = 0;
+	int ret = 0;
+
+	pr_info("[%s] led pulse_delay value : %u\n", __func__, value);
+
+	ird1 = (value >> 2) & 0xFF;
+	ird2 = ((value & 0x03) << 6) | 0x2C; /* value 0x2C means RSVD[5:0] Reserved */
+
+	pr_info("[%s] IRD1(0x%02x), IRD2(0x%02x)\n", __func__, ird1, ird2);
+
+	/* set 0x18, 0x19 */
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_IRD1, ird1);
+	ret |= s2mpb02_write_reg(global_led_datas[0]->i2c, S2MPB02_REG_FLED_IRD2, ird2);
+	if (ret < 0)
+		pr_err("[%s] i2c write error", __func__);
+
+	return ret;
+}
+EXPORT_SYMBOL(s2mpb02_ir_led_pulse_delay);
+
+int s2mpb02_ir_led_max_time(int32_t max_time)
+{
+	int ret = 0;
+
+	pr_info("[%s] led max_time value : %u\n", __func__, max_time);
+
+	ret |= s2mpb02_set_bits(global_led_datas[0]->i2c, S2MPB02_REG_FLED_CTRL2,
+		S2MPB02_FLED2_MAX_TIME_CLEAR_MASK, 0x00);
+	ret |= s2mpb02_set_bits(global_led_datas[0]->i2c, S2MPB02_REG_FLED_TIME2,
+		S2MPB02_FLED2_MAX_TIME_EN_MASK, 0x00);
+	if (max_time > 0) {
+		ret |= s2mpb02_set_bits(global_led_datas[0]->i2c, S2MPB02_REG_FLED_TIME2,
+			S2MPB02_FLED2_MAX_TIME_EN_MASK, 0x01);
+
+		ret |= s2mpb02_set_bits(global_led_datas[0]->i2c, S2MPB02_REG_FLED_IRON2,
+			S2MPB02_FLED2_MAX_TIME_MASK, (u8) max_time - 1);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(s2mpb02_ir_led_max_time);
+#endif
 
 ssize_t s2mpb02_store(struct device *dev,
 			struct device_attribute *attr, const char *buf,
 			size_t count)
 {
-	int i=0;
-	int onoff=-1;
+	int i = 0;
+	int onoff = -1;
 	sysfs_flash_op = 0;
 
-	if(buf==NULL || kstrtouint(buf, 10, &onoff))
+	if(buf == NULL || kstrtouint(buf, 10, &onoff))
 		return -1;
 
-	if(global_led_datas==NULL){
+	if(global_led_datas == NULL) {
 		pr_err("<%s> global_led_datas is NULL\n", __func__);
 		return -1;
 	}
 
-	for(i=0; i<S2MPB02_LED_MAX; i++){
-		if(global_led_datas[i]==NULL){
+	for (i = 0; i < S2MPB02_LED_MAX; i++) {
+		if (global_led_datas[i] == NULL){
 			pr_err("<%s> global_led_datas[%d] is NULL\n", __func__, i);
 			return -1;
 		}
+	}
+
+	pr_info("<%s> sysfs torch value %d\n", __func__, onoff);
+	if (onoff == 0) {
+		// Torch OFF
+		onoff = 0;
+	} else if (onoff == 1) {
+		// Torch ON
+		onoff = S2MPB02_TORCH_OUT_I_60MA;
+	} else if (onoff == 100) {
+		// Factory Torch ON
+		onoff = S2MPB02_TORCH_OUT_I_240MA;
+	} else if ((1001 <= onoff) && (onoff <= 1010)) {
+		// Torch ON : Step 20mA ~ 200mA
+		onoff = onoff - 1000;
+	} else {
+		pr_err("<%s> value %d is invalid\n", __func__, onoff);
 	}
 
 	s2mpb02_led_en(S2MPB02_TORCH_LED_1, onoff);
@@ -327,21 +541,21 @@ ssize_t s2mpb02_store(struct device *dev,
 ssize_t s2mpb02_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int i=0;
+	int i = 0;
 
-	if(global_led_datas==NULL){
+	if (global_led_datas==NULL) {
 		pr_err("<%s> global_led_datas is NULL\n", __func__);
 		return sprintf(buf, "%d\n", -1);
 	}
 
-	for(i=0; i<S2MPB02_LED_MAX; i++){
-		if(global_led_datas[i]==NULL){
+	for (i = 0; i < S2MPB02_LED_MAX; i++) {
+		if (global_led_datas[i]==NULL) {
 			pr_err("<%s> global_led_datas[%d] is NULL\n", __func__, i);
 			return sprintf(buf, "%d\n", -1);
 		}
 	}
 
-	if(global_led_datas[S2MPB02_TORCH_LED_1]->test_brightness == LED_OFF){
+	if (global_led_datas[S2MPB02_TORCH_LED_1]->test_brightness == LED_OFF) {
 		return sprintf(buf, "%d\n", 0);
 	}else{
 		return sprintf(buf, "%d\n", global_led_datas[S2MPB02_TORCH_LED_1]->data->brightness);
@@ -455,7 +669,7 @@ static int s2mpb02_led_probe(struct platform_device *pdev)
 	global_led_datas=kzalloc( sizeof(struct s2mpb02_led_data *)*S2MPB02_LED_MAX, GFP_KERNEL);
 
 	led_datas = kzalloc(sizeof(struct s2mpb02_led_data *)
-			    * S2MPB02_LED_MAX, GFP_KERNEL);
+				* S2MPB02_LED_MAX, GFP_KERNEL);
 	if (unlikely(!led_datas)) {
 		pr_err("[LED] memory allocation error %s", __func__);
 		kfree(pdata);
@@ -530,6 +744,11 @@ static int s2mpb02_led_probe(struct platform_device *pdev)
 		}
 	}
 
+#if defined(DEBUG_READ_REGISTER)
+	(void)debugfs_create_file("s2mpb02-led-regs", S_IRUGO, NULL,
+					(void *)s2mpb02, &s2mpb02_debugfs_fops);
+#endif
+
 #ifdef CONFIG_OF
 	kfree(pdata);
 #endif
@@ -545,6 +764,13 @@ static int s2mpb02_led_probe(struct platform_device *pdev)
 				__func__ ,dev_attr_rear_flash.attr.name);
 		return -ENOENT;
 	}
+#ifdef DEBUG_WRITE_REGISTER
+	if (device_create_file(s2mpb02_led_dev, &dev_attr_s2mpb02_cam_reg) < 0) {
+		pr_err("<%s> Failed to create device file!(%s)!\n", __func__,
+			dev_attr_s2mpb02_cam_reg.attr.name);
+		return -ENOENT;
+	}
+#endif
 
 	pr_err("<%s> end\n", __func__);
 	return ret;
@@ -570,6 +796,11 @@ static int s2mpb02_led_remove(struct platform_device *pdev)
 	if(global_led_datas != NULL)
 		kfree(global_led_datas);
 	device_remove_file(s2mpb02_led_dev, &dev_attr_rear_flash);
+
+#ifdef DEBUG_WRITE_REGISTER
+	device_remove_file(s2mpb02_led_dev, &dev_attr_s2mpb02_cam_reg);
+#endif
+
 #if 0 //TEMP_8996
 	device_destroy(camera_class, 0);
 	class_destroy(camera_class);

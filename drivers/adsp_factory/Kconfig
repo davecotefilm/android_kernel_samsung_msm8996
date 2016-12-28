@@ -28,6 +28,12 @@ config AK09911C_FACTORY
 	help
 	  ak09911c file for factory test in adsp.
 
+config AK09916C_FACTORY
+	tristate "factory test for adsp - ak09916c"
+	default n
+	help
+	  ak09916c file for factory test in adsp.
+
 config BMP280_FACTORY
 	tristate "factory test for adsp - bmp280"
 	default n
@@ -39,3 +45,30 @@ config TMD490X_FACTORY
 	default n
 	help
 	  tmd490x file for factory test in adsp.
+
+config SUPPORT_TMD4904_FACTORY
+	tristate "factory test for adsp - tmd4904"
+	depends on TMD490X_FACTORY
+	default n
+	help
+	  tmd4904 feature for factory test in adsp.
+
+config SUPPORT_PROX_AUTO_CAL
+	tristate "Support Auto Calibration for proximity sensor - tmd490x"
+	default n
+	depends on TMD490X_FACTORY
+	help
+	  Support the Auto Calibration function in tmd490x.
+
+config SUPPORT_HIDDEN_HOLE
+	tristate "Support Hidden Hole function for proximity sensor"
+	default n
+	depends on ADSP_FACTORY
+	help
+	  Support the Hidden Hole function.
+
+config SLPI_MOTOR
+	tristate "Sensors support motor"
+	default n
+	help
+	  Support the motor state function

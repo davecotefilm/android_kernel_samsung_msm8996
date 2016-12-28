@@ -72,7 +72,7 @@ void msm_isp_notify(struct vfe_device *vfe_dev, uint32_t event_type,
 
 void msm_isp_process_axi_irq(struct vfe_device *vfe_dev,
 	uint32_t irq_status0, uint32_t irq_status1,
-	struct msm_isp_timestamp *ts);
+	uint32_t pingpong_status, struct msm_isp_timestamp *ts);
 
 void msm_isp_axi_disable_all_wm(struct vfe_device *vfe_dev);
 
@@ -88,6 +88,7 @@ int msm_isp_drop_frame(struct vfe_device *vfe_dev,
 
 void msm_isp_halt(struct vfe_device *vfe_dev);
 void msm_isp_halt_send_error(struct vfe_device *vfe_dev, uint32_t event);
+void msm_isp_update_cb_handle(struct vfe_device *vfe_dev, void *arg);
 
 static inline void msm_isp_cfg_wm_scratch(struct vfe_device *vfe_dev,
 				int wm,

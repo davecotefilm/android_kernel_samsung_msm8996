@@ -59,9 +59,6 @@
 #endif
 	.endm
 
-#ifdef CONFIG_RKP_CFP_JOPP
-alloc_function_entry_magic_number entry_magic
-#endif
 
 /*
  * Bad Abort numbers
@@ -97,10 +94,6 @@ alloc_function_entry_magic_number entry_magic
 	push	x4, x5
 	push	x2, x3
 	push	x0, x1
-#ifdef CONFIG_RKP_CFP_JOPP
-	/* Might be in the middle of a blr springboard and RRS != the magic number. Load it again.*/
-	load_function_entry_magic_number_far_away entry_magic
-#endif
 	.if	\el == 0
 	mrs	x21, sp_el0
 	get_thread_info tsk			// Ensure MDSCR_EL1.SS is clear,
@@ -115,11 +108,11 @@ alloc_function_entry_magic_number entry_magic
 	hvc	#0
 	pop	x0, x1
 #elif defined (CONFIG_RKP_CFP_ROPP_RANDOM_KEY)
-	mrs 	RRK, CNTPCT_EL0
-	str 	RRK, [tsk, #TI_RRK]
+	mrs	RRK, CNTPCT_EL0
+	str	RRK, [tsk, #TI_RRK]
 #else
-	mov 	RRK, #0
-	str 	RRK, [tsk, #TI_RRK]
+	mov	RRK, #0
+	str	RRK, [tsk, #TI_RRK]
 #endif
 #endif
         disable_step_tsk x19, x20		// exceptions when scheduling.
@@ -698,11 +691,8 @@ ENTRY(cpu_switch_to)
 #ifdef CONFIG_RKP_CFP_ROPP
 	push		x27, x28
 	get_thread_info tsk
-	load_key 	tsk
+	load_key	tsk
 	pop		x27, x28
-#endif
-#ifdef CONFIG_RKP_CFP_JOPP
-	load_function_entry_magic_number_far_away entry_magic
 #endif
 	ret
 ENDPROC(cpu_switch_to)

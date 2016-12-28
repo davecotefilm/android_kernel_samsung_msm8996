@@ -55,6 +55,12 @@ enum boot_events_type {
     RIL_SIM_RECORDSLOADED,
     RIL_RUIM_RECORDSLOADED,
 	RIL_SETUPDATACALL,
+    RIL_RESPONSE_SETUPDATACALL,
+    RIL_DATA_CONNECTION_ATTACHED,
+    RIL_DCT_IMSI_READY,
+    RIL_COMPLETE_CONNECTION,
+	RIL_CS_REG,
+	RIL_GPRS_ATTACH,
 };
 
 static struct boot_event boot_events[] = {
@@ -82,6 +88,12 @@ static struct boot_event boot_events[] = {
     {RIL_SIM_RECORDSLOADED,"!@Boot_SVC : SIM onAllRecordsLoaded",0},
     {RIL_RUIM_RECORDSLOADED,"!@Boot_SVC : RUIM onAllRecordsLoaded",0},
 	{RIL_SETUPDATACALL,"!@Boot_SVC : setupDataCall",0},
+    {RIL_RESPONSE_SETUPDATACALL,"!@Boot_SVC : Response setupDataCall",0},
+    {RIL_DATA_CONNECTION_ATTACHED,"!@Boot_SVC : onDataConnectionAttached",0},
+    {RIL_DCT_IMSI_READY,"!@Boot_SVC : IMSI Ready",0},
+    {RIL_COMPLETE_CONNECTION,"!@Boot_SVC : completeConnection",0},
+	{RIL_CS_REG,"!@Boot_SVC : CS Registered",0},
+	{RIL_GPRS_ATTACH,"!@Boot_SVC : GPRS Attached",0},
 	{0,NULL,0},
 };
 

@@ -34,5 +34,7 @@ obj-$(CONFIG_MUIC_UNIVERSAL_SM5703)		+= universal/muic_regmap_sm5703.o
 obj-$(CONFIG_MUIC_UNIVERSAL_S2MM001)	+= universal/muic_regmap_s2mm001b.o
 obj-$(CONFIG_MUIC_UNIVERSAL_MAX77849)	+= universal/muic_regmap_max77849.o
 obj-$(CONFIG_MUIC_UNIVERSAL_MAX77854)	+= universal/muic_regmap_max77854.o
+obj-$(CONFIG_MUIC_UNIVERSAL_SM5703)	+= universal/muic_regmap_sm5703.o
+obj-$(CONFIG_MUIC_UNIVERSAL_SM5703_AFC)	+= universal/muic_sm5703_afc.o
 
 obj-$(CONFIG_MUIC_HV)	+= universal/muic_hv.o

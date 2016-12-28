@@ -10,6 +10,9 @@
  * published by the Free Software Foundation.
  */
 #include <linux/mfd/max77854-private.h>
+#if defined(CONFIG_BATTERY_NOTIFIER)
+#include <linux/battery/battery_notifier.h>
+#endif
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/power_supply.h>
@@ -32,7 +35,6 @@ static enum power_supply_property max77854_charger_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_CHARGE_TYPE,
-	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
 	POWER_SUPPLY_PROP_CURRENT_AVG,
@@ -672,8 +674,8 @@ static void max77854_set_input_current(struct max77854_charger_data *charger,
 	}
 
 	mutex_unlock(&charger->charger_mutex);
-	pr_info("[%s] REG(0x%02x) DATA(0x%02x)\n",
-		__func__, set_reg, reg_data);
+	pr_info("[%s] REG(0x%02x) DATA(0x%02x), CURRENT(%d)\n",
+		__func__, set_reg, reg_data, input_current);
 }
 
 static void max77854_set_charge_current(struct max77854_charger_data *charger,
@@ -720,7 +722,7 @@ static void max77854_set_wireless_input_current(struct max77854_charger_data *ch
 	if (charger->wc_current > charger->wc_pre_current) {
 		max77854_set_charge_current(charger, charger->charging_current);
 	}
-	queue_delayed_work_on(0, charger->wqueue, &charger->wc_current_work, 0);
+	queue_delayed_work(charger->wqueue, &charger->wc_current_work, 0);
 }
 
 static void max77854_set_topoff_current(struct max77854_charger_data *charger,
@@ -1081,8 +1083,7 @@ static int max77854_chg_set_property(struct power_supply *psy,
 		pr_info("%s: CHGIN-OTG %s\n", __func__, val->intval > 0 ? "on" : "off");
 		/* CHGIN-OTG */
 		if (val->intval) {
-			if (charger->cable_type == POWER_SUPPLY_TYPE_WIRELESS ||
-				charger->cable_type == POWER_SUPPLY_TYPE_HV_WIRELESS ||
+			if (charger->cable_type == POWER_SUPPLY_TYPE_HV_WIRELESS ||
 				charger->cable_type == POWER_SUPPLY_TYPE_WIRELESS_HV_STAND) {
 				pr_info("%s: OTG enabled on HV_WC, set 5V", __func__);
 				value.intval = WIRELESS_VOUT_5V;
@@ -1226,9 +1227,7 @@ static int max77854_otg_set_property(struct power_supply *psy,
 		pr_info("%s: CHGIN-OTG %s\n", __func__, val->intval > 0 ? "on" : "off");
 		/* CHGIN-OTG */
 		if (val->intval) {
-			if (charger->cable_type == POWER_SUPPLY_TYPE_WIRELESS ||
-				charger->cable_type == POWER_SUPPLY_TYPE_HV_WIRELESS ||
-				charger->cable_type == POWER_SUPPLY_TYPE_WIRELESS_STAND ||
+			if (charger->cable_type == POWER_SUPPLY_TYPE_HV_WIRELESS ||
 				charger->cable_type == POWER_SUPPLY_TYPE_WIRELESS_HV_STAND) {
 				pr_info("%s: OTG enabled on HV_WC, set 5V", __func__);
 				value.intval = WIRELESS_VOUT_5V;
@@ -1372,7 +1371,7 @@ static irqreturn_t max77854_chg_irq_thread(int irq, void *irq_data)
 	     SEC_BATTERY_FULLCHARGED_CHGINT) ||
 	    (charger->pdata->ovp_uvlo_check_type ==
 	     SEC_BATTERY_OVP_UVLO_CHGINT))
-		schedule_delayed_work(&charger->isr_work, 0);
+		queue_delayed_work(charger->wqueue, &charger->isr_work, 0);
 
 	return IRQ_HANDLED;
 }
@@ -1533,6 +1532,15 @@ static void max77854_aicl_isr_work(struct work_struct *work)
 		if (max77854_get_input_current(charger) <= MINIMUM_INPUT_CURRENT)
 			break;
 	}
+#if defined(CONFIG_BATTERY_NOTIFIER)
+{
+	struct charger_notifier_struct charger_notifier;
+	/* notify the AICL to multi_charger */
+	charger_notifier.event = CHARGER_NOTIFY_EVENT_AICL;
+	charger_notifier.aicl_status.input_current = max77854_get_input_current(charger);
+	charger_notifier_call(&charger_notifier);
+}
+#endif
 	if (charger->cable_type != POWER_SUPPLY_TYPE_WIRELESS &&
 		charger->cable_type != POWER_SUPPLY_TYPE_HV_WIRELESS &&
 		charger->cable_type != POWER_SUPPLY_TYPE_PMA_WIRELESS &&
@@ -1766,7 +1774,7 @@ static void max77854_wc_current_work(struct work_struct *work)
 				charger->wc_pre_current += WC_CURRENT_STEP;
 		}
 		max77854_set_input_current(charger, charger->wc_pre_current);
-		queue_delayed_work_on(0, charger->wqueue, &charger->wc_current_work,
+		queue_delayed_work(charger->wqueue, &charger->wc_current_work,
 				msecs_to_jiffies(WC_CURRENT_WORK_STEP));
 	}
 	pr_info("%s: wc_current(%d), wc_pre_current(%d), diff(%d)\n",
@@ -1839,6 +1847,7 @@ static int max77854_charger_probe(struct platform_device *pdev)
 	struct max77854_dev *max77854 = dev_get_drvdata(pdev->dev.parent);
 	struct max77854_platform_data *pdata = dev_get_platdata(max77854->dev);
 	struct max77854_charger_data *charger;
+	sec_charger_platform_data_t *charger_data;
 	int ret = 0;
 	u8 reg_data;
 
@@ -1848,8 +1857,8 @@ static int max77854_charger_probe(struct platform_device *pdev)
 	if (!charger)
 		return -ENOMEM;
 
-	pdata->charger_data = kzalloc(sizeof(sec_charger_platform_data_t), GFP_KERNEL);
-	if (!pdata->charger_data) {
+	charger_data = kzalloc(sizeof(sec_charger_platform_data_t), GFP_KERNEL);
+	if (!charger_data) {
 		ret = -ENOMEM;
 		goto err_free;
 	}
@@ -1858,7 +1867,7 @@ static int max77854_charger_probe(struct platform_device *pdev)
 	charger->dev = &pdev->dev;
 	charger->i2c = max77854->charger;
 	charger->pmic_i2c = max77854->i2c;
-	charger->pdata = pdata->charger_data;
+	charger->pdata = charger_data;
 	charger->aicl_on = false;
 	charger->is_mdock = false;
 	charger->max77854_pdata = pdata;
@@ -2033,7 +2042,7 @@ err_power_supply_register_otg:
 err_power_supply_register_chg:
 	destroy_workqueue(charger->wqueue);
 err_pdata_free:
-	kfree(pdata->charger_data);
+	kfree(charger_data);
 	mutex_destroy(&charger->charger_mutex);
 err_free:
 	kfree(charger);

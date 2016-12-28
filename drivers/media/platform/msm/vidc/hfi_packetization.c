@@ -124,9 +124,10 @@ static inline int hal_to_hfi_type(int property, int hal_type)
 	}
 }
 
-static inline u32 get_hfi_layout(enum hal_buffer_layout_type hal_buf_layout)
+u32 get_hfi_layout(enum hal_buffer_layout_type hal_buf_layout)
 {
 	u32 hfi_layout;
+
 	switch (hal_buf_layout) {
 	case HAL_BUFFER_LAYOUT_TOP_BOTTOM:
 		hfi_layout = HFI_MVC_BUFFER_LAYOUT_TOP_BOTTOM;
@@ -143,9 +144,110 @@ static inline u32 get_hfi_layout(enum hal_buffer_layout_type hal_buf_layout)
 	return hfi_layout;
 }
 
-static inline u32 get_hfi_codec(enum hal_video_codec hal_codec)
+enum hal_domain vidc_get_hal_domain(u32 hfi_domain)
 {
-	u32 hfi_codec;
+	enum hal_domain hal_domain = 0;
+
+	switch (hfi_domain) {
+	case HFI_VIDEO_DOMAIN_VPE:
+		hal_domain = HAL_VIDEO_DOMAIN_VPE;
+		break;
+	case HFI_VIDEO_DOMAIN_ENCODER:
+		hal_domain = HAL_VIDEO_DOMAIN_ENCODER;
+		break;
+	case HFI_VIDEO_DOMAIN_DECODER:
+		hal_domain = HAL_VIDEO_DOMAIN_DECODER;
+		break;
+	default:
+		dprintk(VIDC_ERR, "%s: invalid domain %x\n",
+			__func__, hfi_domain);
+		hal_domain = 0;
+		break;
+	}
+	return hal_domain;
+}
+
+enum hal_video_codec vidc_get_hal_codec(u32 hfi_codec)
+{
+	enum hal_video_codec hal_codec = 0;
+
+	switch (hfi_codec) {
+	case HFI_VIDEO_CODEC_H264:
+		hal_codec = HAL_VIDEO_CODEC_H264;
+		break;
+	case HFI_VIDEO_CODEC_H263:
+		hal_codec = HAL_VIDEO_CODEC_H263;
+		break;
+	case HFI_VIDEO_CODEC_MPEG1:
+		hal_codec = HAL_VIDEO_CODEC_MPEG1;
+		break;
+	case HFI_VIDEO_CODEC_MPEG2:
+		hal_codec = HAL_VIDEO_CODEC_MPEG2;
+		break;
+	case HFI_VIDEO_CODEC_MPEG4:
+		hal_codec = HAL_VIDEO_CODEC_MPEG4;
+		break;
+	case HFI_VIDEO_CODEC_DIVX_311:
+		hal_codec = HAL_VIDEO_CODEC_DIVX_311;
+		break;
+	case HFI_VIDEO_CODEC_DIVX:
+		hal_codec = HAL_VIDEO_CODEC_DIVX;
+		break;
+	case HFI_VIDEO_CODEC_VC1:
+		hal_codec = HAL_VIDEO_CODEC_VC1;
+		break;
+	case HFI_VIDEO_CODEC_SPARK:
+		hal_codec = HAL_VIDEO_CODEC_SPARK;
+		break;
+	case HFI_VIDEO_CODEC_VP8:
+		hal_codec = HAL_VIDEO_CODEC_VP8;
+		break;
+	case HFI_VIDEO_CODEC_HEVC:
+		hal_codec = HAL_VIDEO_CODEC_HEVC;
+		break;
+	case HFI_VIDEO_CODEC_VP9:
+		hal_codec = HAL_VIDEO_CODEC_VP9;
+		break;
+	case HFI_VIDEO_CODEC_HEVC_HYBRID:
+		hal_codec = HAL_VIDEO_CODEC_HEVC_HYBRID;
+		break;
+	default:
+		dprintk(VIDC_INFO, "%s: invalid codec 0x%x\n",
+			__func__, hfi_codec);
+		hal_codec = 0;
+		break;
+	}
+	return hal_codec;
+}
+
+
+u32 vidc_get_hfi_domain(enum hal_domain hal_domain)
+{
+	u32 hfi_domain;
+
+	switch (hal_domain) {
+	case HAL_VIDEO_DOMAIN_VPE:
+		hfi_domain = HFI_VIDEO_DOMAIN_VPE;
+		break;
+	case HAL_VIDEO_DOMAIN_ENCODER:
+		hfi_domain = HFI_VIDEO_DOMAIN_ENCODER;
+		break;
+	case HAL_VIDEO_DOMAIN_DECODER:
+		hfi_domain = HFI_VIDEO_DOMAIN_DECODER;
+		break;
+	default:
+		dprintk(VIDC_ERR, "%s: invalid domain 0x%x\n",
+			__func__, hal_domain);
+		hfi_domain = 0;
+		break;
+	}
+	return hfi_domain;
+}
+
+u32 vidc_get_hfi_codec(enum hal_video_codec hal_codec)
+{
+	u32 hfi_codec = 0;
+
 	switch (hal_codec) {
 	case HAL_VIDEO_CODEC_MVC:
 	case HAL_VIDEO_CODEC_H264:
@@ -188,7 +290,8 @@ static inline u32 get_hfi_codec(enum hal_video_codec hal_codec)
 		hfi_codec = HFI_VIDEO_CODEC_HEVC_HYBRID;
 		break;
 	default:
-		dprintk(VIDC_ERR, "Invalid codec %#x\n", hal_codec);
+		dprintk(VIDC_INFO, "%s: invalid codec 0x%x\n",
+			__func__, hal_codec);
 		hfi_codec = 0;
 		break;
 	}
@@ -377,8 +480,8 @@ inline int create_pkt_cmd_sys_session_init(
 	pkt->size = sizeof(struct hfi_cmd_sys_session_init_packet);
 	pkt->packet_type = HFI_CMD_SYS_SESSION_INIT;
 	pkt->session_id = hash32_ptr(session);
-	pkt->session_domain = session_domain;
-	pkt->session_codec = get_hfi_codec(session_codec);
+	pkt->session_domain = vidc_get_hfi_domain(session_domain);
+	pkt->session_codec = vidc_get_hfi_codec(session_codec);
 	if (!pkt->session_codec)
 		return -EINVAL;
 
@@ -532,6 +635,7 @@ static int get_hfi_extradata_index(enum hal_extradata_id index)
 	case HAL_EXTRADATA_ASPECT_RATIO:
 	case HAL_EXTRADATA_INPUT_CROP:
 	case HAL_EXTRADATA_DIGITAL_ZOOM:
+	case HAL_EXTRADATA_OUTPUT_CROP:
 		ret = HFI_PROPERTY_PARAM_INDEX_EXTRADATA;
 		break;
 	case HAL_EXTRADATA_MPEG2_SEQDISP:
@@ -561,6 +665,16 @@ static int get_hfi_extradata_index(enum hal_extradata_id index)
 	case HAL_EXTRADATA_ROI_QP:
 		ret = HFI_PROPERTY_PARAM_VENC_ROI_QP_EXTRADATA;
 		break;
+	case HAL_EXTRADATA_VUI_DISPLAY_INFO:
+		ret = HFI_PROPERTY_PARAM_VUI_DISPLAY_INFO_EXTRADATA;
+		break;
+	case HAL_EXTRADATA_MASTERING_DISPLAY_COLOUR_SEI:
+		ret =
+		HFI_PROPERTY_PARAM_VDEC_MASTERING_DISPLAY_COLOUR_SEI_EXTRADATA;
+		break;
+	case HAL_EXTRADATA_CONTENT_LIGHT_LEVEL_SEI:
+		ret = HFI_PROPERTY_PARAM_VDEC_CONTENT_LIGHT_LEVEL_SEI_EXTRADATA;
+		break;
 	default:
 		dprintk(VIDC_WARN, "Extradata index not found: %d\n", index);
 		break;
@@ -580,6 +694,9 @@ static int get_hfi_extradata_id(enum hal_extradata_id index)
 		break;
 	case HAL_EXTRADATA_DIGITAL_ZOOM:
 		ret = MSM_VIDC_EXTRADATA_DIGITAL_ZOOM;
+		break;
+	case HAL_EXTRADATA_OUTPUT_CROP:
+		ret = MSM_VIDC_EXTRADATA_OUTPUT_CROP;
 		break;
 	default:
 		ret = get_hfi_extradata_index(index);
@@ -1969,6 +2086,43 @@ int create_pkt_cmd_session_set_property(
 		pkt->size += sizeof(u32) + sizeof(struct hfi_enable);
 		break;
 	}
+	case HAL_PARAM_VENC_VIDEO_SIGNAL_INFO:
+	{
+		u32 color_space, matrix_coeffs, transfer_chars;
+		struct hal_video_signal_info *hal = pdata;
+		struct hfi_video_signal_metadata *signal_info =
+			(struct hfi_video_signal_metadata *)
+			&pkt->rg_property_data[1];
+
+		switch (hal->color_space) {
+		/* See colour_primaries of ISO/IEC 14496 for significance */
+		case HAL_VIDEO_COLOR_SPACE_601:
+			color_space = 5;
+			transfer_chars = 6;
+			matrix_coeffs = 5;
+			break;
+		case HAL_VIDEO_COLOR_SPACE_709:
+			color_space = 1;
+			transfer_chars = 1;
+			matrix_coeffs = 1;
+			break;
+		default:
+			return -ENOTSUPP;
+		}
+
+		signal_info->enable = true;
+		signal_info->video_format = 5;
+		signal_info->video_full_range = !hal->clamped;
+		signal_info->color_description = 1;
+		signal_info->color_primaries = color_space;
+		signal_info->transfer_characteristics = transfer_chars;
+		signal_info->matrix_coeffs = matrix_coeffs;
+
+		pkt->rg_property_data[0] =
+			HFI_PROPERTY_PARAM_VENC_VIDEO_SIGNAL_INFO;
+		pkt->size += sizeof(u32) + sizeof(*signal_info);
+		break;
+	}
 	case HAL_PARAM_VENC_IFRAMESIZE_TYPE:
 	{
 		enum hal_iframesize_type hal =
@@ -2204,6 +2358,26 @@ static int create_3x_pkt_cmd_session_set_property(
 			HFI_PROPERTY_PARAM_VENC_H264_PICORDER_CNT_TYPE;
 		pkt->rg_property_data[1] = *(u32 *)pdata;
 		pkt->size += sizeof(u32) * 2;
+		break;
+	}
+	case HAL_CONFIG_VENC_BLUR_RESOLUTION:
+	{
+		struct hfi_frame_size *hfi;
+		struct hal_frame_size *prop = (struct hal_frame_size *) pdata;
+		u32 buffer_type;
+
+		pkt->rg_property_data[0] =
+			HFI_PROPERTY_CONFIG_VENC_BLUR_FRAME_SIZE;
+		hfi = (struct hfi_frame_size *) &pkt->rg_property_data[1];
+		buffer_type = get_hfi_buffer(prop->buffer_type);
+		if (buffer_type)
+			hfi->buffer_type = buffer_type;
+		else
+			return -EINVAL;
+
+		hfi->height = prop->height;
+		hfi->width = prop->width;
+		pkt->size += sizeof(u32) + sizeof(struct hfi_frame_size);
 		break;
 	}
 	default:

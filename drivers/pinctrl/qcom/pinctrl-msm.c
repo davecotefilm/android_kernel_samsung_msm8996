@@ -556,6 +556,12 @@ void msm_gp_get_cfg(struct gpio_chip *chip, uint pin_no, struct gpiomux_setting 
 		return;
 #endif
 
+#ifdef ENABLE_IRIS_SECURE_I2C_GPIO
+	if (pin_no >= CONFIG_IRIS_I2C_GPIO_START
+		&& pin_no <= CONFIG_IRIS_I2C_GPIO_END)
+		return;
+#endif
+
 #ifdef CONFIG_ESE_SECURE
 	if (pin_no >= CONFIG_ESE_SPI_GPIO_START
 		&& pin_no <= CONFIG_ESE_SPI_GPIO_END) {
@@ -588,8 +594,15 @@ int msm_gp_get_value(struct gpio_chip *chip, uint pin_no, int in_out_type)
 		&& pin_no <= CONFIG_SENSORS_FP_SPI_GPIO_END)
 		return 0;
 #endif
+
 #ifdef CONFIG_MST_LDO
 	if (pin_no == MST_GPIO_D_MINUS || pin_no == MST_GPIO_D_PLUS)
+		return 0;
+#endif
+
+#ifdef ENABLE_IRIS_SECURE_I2C_GPIO
+	if (pin_no >= CONFIG_IRIS_I2C_GPIO_START
+		&& pin_no <= CONFIG_IRIS_I2C_GPIO_END)
 		return 0;
 #endif
 
@@ -657,6 +670,21 @@ static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
 		if (gpio >= CONFIG_SENSORS_FP_SPI_GPIO_START
 			&& gpio <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+			continue;
+#endif
+
+#ifdef ENABLE_IRIS_SECURE_I2C_GPIO
+		if (gpio >= CONFIG_IRIS_I2C_GPIO_START
+			&& gpio <= CONFIG_IRIS_I2C_GPIO_END)
+			continue;
+#endif
+#ifdef CONFIG_MST_LDO
+		if (gpio == MST_GPIO_D_MINUS || gpio == MST_GPIO_D_PLUS)
+			continue;
+#endif
+#ifdef CONFIG_ESE_SECURE
+		if (gpio >= CONFIG_ESE_SPI_GPIO_START
+			&& gpio <= CONFIG_ESE_SPI_GPIO_END)
 			continue;
 #endif
 		msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
@@ -919,12 +947,21 @@ static struct irq_chip msm_gpio_irq_chip = {
 	.irq_set_wake   = msm_gpio_irq_set_wake,
 };
 
+#ifdef CONFIG_SEC_PM
+int wakeup_gpio_irq_flag = 0;
+extern char last_resume_kernel_reason[];
+extern int last_resume_kernel_reason_len;
+#endif
+
 static void msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 {
 	struct gpio_chip *gc = irq_desc_get_handler_data(desc);
 	const struct msm_pingroup *g;
 	struct msm_pinctrl *pctrl = to_msm_pinctrl(gc);
 	struct irq_chip *chip = irq_get_chip(irq);
+#ifdef CONFIG_SEC_PM
+	struct irq_desc *desc_g;
+#endif
 	int irq_pin;
 	int handled = 0;
 	u32 val;
@@ -941,6 +978,27 @@ static void msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 		val = readl(pctrl->regs + g->intr_status_reg);
 		if (val & BIT(g->intr_status_bit)) {
 			irq_pin = irq_find_mapping(gc->irqdomain, i);
+#ifdef CONFIG_SEC_PM
+			desc_g = irq_to_desc(irq_pin);
+			if (wakeup_gpio_irq_flag == 1) {
+				if (desc_g && desc_g->action && desc_g->action->name) {
+					pr_warn("Resume caused by GPIO %d(irq %d), %s\n",
+							irq_pin, irq, desc_g->action->name);
+					last_resume_kernel_reason_len += 
+							sprintf(last_resume_kernel_reason + last_resume_kernel_reason_len,
+							"GPIO %d(irq %d), %s|",
+							irq_pin, irq, desc_g->action->name);
+				} else {
+					pr_warn("Resume caused by GPIO %d(irq %d)\n",
+							irq_pin, irq);
+					last_resume_kernel_reason_len += 
+							sprintf(last_resume_kernel_reason + last_resume_kernel_reason_len,
+							"GPIO %d(irq %d)|",
+							irq_pin, irq);
+				}
+				wakeup_gpio_irq_flag = 0;
+			}
+#endif
 			generic_handle_irq(irq_pin);
 			handled++;
 		}

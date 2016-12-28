@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -85,7 +85,7 @@ static int __disable_regulators(struct venus_hfi_device *device);
 static int __enable_regulators(struct venus_hfi_device *device);
 static inline int __prepare_enable_clks(struct venus_hfi_device *device);
 static inline void __disable_unprepare_clks(struct venus_hfi_device *device);
-static int __scale_clocks(struct venus_hfi_device *device, int load,
+static int __scale_clocks_load(struct venus_hfi_device *device, int load,
 		struct vidc_clk_scale_data *data,
 		unsigned long instant_bitrate);
 static void __flush_debug_queue(struct venus_hfi_device *device, u8 *packet);
@@ -733,6 +733,12 @@ static bool __is_session_supported(unsigned long sessions_supported,
 	return same_codec && same_session_type;
 }
 
+bool venus_hfi_is_session_supported(unsigned long sessions_supported,
+		enum vidc_vote_data_session session_type)
+{
+	return __is_session_supported(sessions_supported, session_type);
+}
+
 static int __devfreq_target(struct device *devfreq_dev,
 		unsigned long *freq, u32 flags)
 {
@@ -846,8 +852,8 @@ static int __vote_buses(struct venus_hfi_device *device,
 	struct vidc_bus_vote_data *new_data = NULL;
 
 	if (!num_data) {
-		/* Meh nothing to do */
-		return 0;
+		dprintk(VIDC_DBG, "No vote data available\n");
+		goto no_data_count;
 	} else if (!data) {
 		dprintk(VIDC_ERR, "Invalid voting data\n");
 		return -EINVAL;
@@ -860,6 +866,7 @@ static int __vote_buses(struct venus_hfi_device *device,
 		goto err_no_mem;
 	}
 
+no_data_count:
 	kfree(device->bus_vote.data);
 	device->bus_vote.data = new_data;
 	device->bus_vote.data_count = num_data;
@@ -1140,6 +1147,21 @@ static struct clock_info *__get_clock(struct venus_hfi_device *device,
 	return NULL;
 }
 
+static struct regulator_info *__get_regulator(struct venus_hfi_device *device,
+			char *name)
+{
+	struct regulator_info *r;
+
+	venus_hfi_for_each_regulator(device, r) {
+		if (!strcmp(r->name, name))
+			return r;
+	}
+
+	dprintk(VIDC_WARN, "%s Regulator %s not found\n", __func__, name);
+
+	return NULL;
+}
+
 static unsigned long __get_clock_rate(struct clock_info *clock,
 	int num_mbs_per_sec, struct vidc_clk_scale_data *data)
 {
@@ -1353,7 +1375,99 @@ static int __halt_axi(struct venus_hfi_device *device)
 	return rc;
 }
 
-static int __scale_clocks(struct venus_hfi_device *device, int load,
+static int __scale_clocks_cycles_per_mb(struct venus_hfi_device *device,
+		struct vidc_clk_scale_data *data, unsigned long instant_bitrate)
+{
+	int rc = 0, i = 0, j = 0;
+	struct clock_info *cl;
+	struct clock_freq_table *clk_freq_tbl = NULL;
+	struct allowed_clock_rates_table *allowed_clks_tbl = NULL;
+	struct clock_profile_entry *entry = NULL;
+	u64 total_freq = 0, rate = 0;
+
+	clk_freq_tbl = &device->res->clock_freq_tbl;
+	allowed_clks_tbl = device->res->allowed_clks_tbl;
+
+	if (!data) {
+		dprintk(VIDC_DBG, "%s: NULL scale data\n", __func__);
+		total_freq = device->clk_freq;
+		goto get_clock_freq;
+	}
+
+	device->clk_bitrate = instant_bitrate;
+
+	for (i = 0; i < data->num_sessions; i++) {
+		/*
+		 * for each active session iterate through all possible
+		 * sessions and get matching session's cycles per mb
+		 * from dtsi and multiply with the session's load to
+		 * get the frequency required for the session.
+		 * accumulate all session's frequencies to get the
+		 * total clock frequency.
+		 */
+		for (j = 0; j < clk_freq_tbl->count; j++) {
+			bool matched = false;
+			u64 freq = 0;
+
+			entry = &clk_freq_tbl->clk_prof_entries[j];
+
+			matched = __is_session_supported(entry->codec_mask,
+					data->session[i]);
+			if (!matched)
+				continue;
+
+			freq = entry->cycles * data->load[i];
+
+			if (data->power_mode[i] == VIDC_POWER_LOW &&
+					entry->low_power_factor) {
+				/* low_power_factor is in Q16 format */
+				freq = (freq * entry->low_power_factor) >> 16;
+			}
+
+			total_freq += freq;
+
+			dprintk(VIDC_DBG,
+				"session[%d] %#x: cycles (%d), load (%d), freq (%llu), factor (%d)\n",
+				i, data->session[i], entry->cycles,
+				data->load[i], freq,
+				entry->low_power_factor);
+		}
+	}
+
+get_clock_freq:
+	/*
+	 * get required clock rate from allowed clock rates table
+	 */
+	for (i = device->res->allowed_clks_tbl_size - 1; i >= 0; i--) {
+		rate = allowed_clks_tbl[i].clock_rate;
+		if (rate >= total_freq)
+			break;
+	}
+
+	venus_hfi_for_each_clock(device, cl) {
+		if (!cl->has_scaling)
+			continue;
+
+		device->clk_freq = rate;
+		rc = clk_set_rate(cl->clk, rate);
+		if (rc) {
+			dprintk(VIDC_ERR,
+				"%s: Failed to set clock rate %llu %s: %d\n",
+				__func__, rate, cl->name, rc);
+			return rc;
+		}
+		if (!strcmp(cl->name, "core_clk"))
+			device->scaled_rate = rate;
+
+		dprintk(VIDC_DBG,
+			"scaling clock %s to %llu (required freq %llu)\n",
+			cl->name, rate, total_freq);
+	}
+
+	return rc;
+}
+
+static int __scale_clocks_load(struct venus_hfi_device *device, int load,
 		struct vidc_clk_scale_data *data, unsigned long instant_bitrate)
 {
 	struct clock_info *cl;
@@ -1361,7 +1475,7 @@ static int __scale_clocks(struct venus_hfi_device *device, int load,
 	device->clk_bitrate = instant_bitrate;
 
 	venus_hfi_for_each_clock(device, cl) {
-		if (cl->count) {/* has_scaling */
+		if (cl->has_scaling) {
 
 			unsigned long rate = 0;
 			int rc;
@@ -1402,6 +1516,23 @@ static int __scale_clocks(struct venus_hfi_device *device, int load,
 	return 0;
 }
 
+static int __scale_clocks(struct venus_hfi_device *device,
+		int load, struct vidc_clk_scale_data *data,
+		unsigned long instant_bitrate)
+{
+	int rc = 0;
+
+	if (device->res->clock_freq_tbl.clk_prof_entries &&
+			device->res->allowed_clks_tbl)
+		rc = __scale_clocks_cycles_per_mb(device,
+				data, instant_bitrate);
+	else if (device->res->load_freq_tbl)
+		rc = __scale_clocks_load(device, load, data, instant_bitrate);
+	else
+		dprintk(VIDC_DBG, "Clock scaling is not supported\n");
+
+	return rc;
+}
 static int venus_hfi_scale_clocks(void *dev, int load,
 					struct vidc_clk_scale_data *data,
 					unsigned long instant_bitrate)
@@ -2121,7 +2252,8 @@ static int venus_hfi_core_release(void *dev)
 
 	mutex_lock(&device->lock);
 
-	pm_qos_remove_request(&device->qos);
+	if (device->res->pm_qos_latency_us)
+		pm_qos_remove_request(&device->qos);
 	__set_state(device, VENUS_STATE_DEINIT);
 	__unload_fw(device);
 
@@ -2397,6 +2529,11 @@ static int venus_hfi_session_init(void *device, void *session_id,
 	s->session_id = session_id;
 	s->is_decoder = (session_type == HAL_VIDEO_DOMAIN_DECODER);
 	s->device = dev;
+	s->codec = codec_type;
+	s->domain = session_type;
+	dprintk(VIDC_DBG,
+		"%s: inst %pK, session %pK, codec 0x%x, domain 0x%x\n",
+		__func__, session_id, s, s->codec, s->domain);
 
 	list_add_tail(&s->list, &dev->sess_head);
 
@@ -3150,26 +3287,6 @@ exit:
 	return;
 }
 
-static void __dump_venus_debug_registers(struct venus_hfi_device *device)
-{
-	u32 reg;
-
-	dprintk(VIDC_ERR, "Dumping Venus registers...\n");
-	reg = __read_register(device, VENUS_VBIF_XIN_HALT_CTRL1);
-	dprintk(VIDC_ERR, "VENUS_VBIF_XIN_HALT_CTRL1: 0x%x\n", reg);
-
-	reg = __read_register(device,
-		VIDC_VENUS_WRAPPER_MMCC_VENUS0_POWER_STATUS);
-	dprintk(VIDC_ERR,
-		"VIDC_VENUS_WRAPPER_MMCC_VENUS0_POWER_STATUS: 0x%x\n", reg);
-
-	reg = __read_register(device, VIDC_WRAPPER_CPU_STATUS);
-	dprintk(VIDC_ERR, "VIDC_WRAPPER_CPU_STATUS: 0x%x\n", reg);
-
-	reg = __read_register(device, VIDC_CPU_CS_SCIACMDARG0);
-	dprintk(VIDC_ERR, "VIDC_CPU_CS_SCIACMDARG0: 0x%x\n", reg);
-}
-
 static void __process_sys_error(struct venus_hfi_device *device)
 {
 	struct hfi_sfr_struct *vsfr = NULL;
@@ -3285,7 +3402,6 @@ static int __response_handler(struct venus_hfi_device *device)
 			dprintk(VIDC_ERR, "SFR Message from FW: %s\n",
 					vsfr->rg_data);
 
-		__dump_venus_debug_registers(device);
 		dprintk(VIDC_ERR, "Received watchdog timeout\n");
 		packets[packet_count++] = info;
 		goto exit;
@@ -3295,6 +3411,7 @@ static int __response_handler(struct venus_hfi_device *device)
 	while (!__iface_msgq_read(device, raw_packet)) {
 		void **session_id = NULL;
 		struct msm_vidc_cb_info *info = &packets[packet_count++];
+		struct vidc_hal_sys_init_done sys_init_done = {0};
 		int rc = 0;
 
 		rc = hfi_process_msg_packet(device->device_id,
@@ -3309,7 +3426,6 @@ static int __response_handler(struct venus_hfi_device *device)
 		/* Process the packet types that we're interested in */
 		switch (info->response_type) {
 		case HAL_SYS_ERROR:
-			__dump_venus_debug_registers(device);
 			__process_sys_error(device);
 			break;
 		case HAL_SYS_RELEASE_RESOURCE_DONE:
@@ -3324,6 +3440,12 @@ static int __response_handler(struct venus_hfi_device *device)
 			if (__set_imem(device, &device->resources.imem))
 				dprintk(VIDC_WARN,
 				"Failed to set IMEM. Performance will be impacted\n");
+			sys_init_done.capabilities =
+				device->sys_init_capabilities;
+			hfi_process_sys_init_done_prop_read(
+				(struct hfi_msg_sys_init_done_packet *)
+					raw_packet, &sys_init_done);
+			info->response.cmd.data.sys_init_done = sys_init_done;
 			break;
 		case HAL_SESSION_LOAD_RESOURCE_DONE:
 			/*
@@ -3571,8 +3693,8 @@ static inline int __init_clocks(struct venus_hfi_device *device)
 	venus_hfi_for_each_clock(device, cl) {
 		int i = 0;
 
-		dprintk(VIDC_DBG, "%s: scalable? %d\n",
-				cl->name, !!cl->count);
+		dprintk(VIDC_DBG, "%s: scalable? %d, count %d\n",
+				cl->name, cl->has_scaling, cl->count);
 		for (i = 0; i < cl->count; ++i) {
 			dprintk(VIDC_DBG,
 				"\tload = %d, freq = %d codecs supported %#x\n",
@@ -3635,7 +3757,7 @@ static inline int __prepare_enable_clks(struct venus_hfi_device *device)
 		 * them.  Since we don't really have a load at this point, scale
 		 * it to the lowest frequency possible
 		 */
-		if (cl->count)
+		if (cl->has_scaling)
 			clk_set_rate(cl->clk, clk_round_rate(cl->clk, 0));
 
 		rc = clk_prepare_enable(cl->clk);
@@ -3808,6 +3930,10 @@ static int __init_resources(struct venus_hfi_device *device,
 		goto err_init_bus;
 	}
 
+	device->sys_init_capabilities =
+		kzalloc(sizeof(struct msm_vidc_capability)
+		* VIDC_MAX_SESSIONS, GFP_TEMPORARY);
+
 	return rc;
 
 err_init_bus:
@@ -3822,6 +3948,8 @@ static void __deinit_resources(struct venus_hfi_device *device)
 	__deinit_bus(device);
 	__deinit_clocks(device);
 	__deinit_regulators(device);
+	kfree(device->sys_init_capabilities);
+	device->sys_init_capabilities = NULL;
 }
 
 static int __protect_cp_mem(struct venus_hfi_device *device)
@@ -3938,10 +4066,57 @@ static int __enable_hw_power_collapse(struct venus_hfi_device *device)
 	return rc;
 }
 
+static int __core_clk_reset(struct venus_hfi_device *device,
+				enum clk_reset_action action)
+{
+	int rc = 0;
+	struct regulator_info *rinfo;
+	struct clock_info *vc;
+
+	rinfo = __get_regulator(device, "venus");
+	if (!rinfo)
+		return -EINVAL;
+
+	/*
+	 * This is a workaround for msm8996 V2, because MDP enables
+	 * Venus GDSC. Due to MDP's vote on Venus GDSC, some of Venus
+	 * registers are not cleared after firmware is unloaded. This
+	 * causes subsequent video sessions to fail. By resetting
+	 * core_clk we are forcing a hard reset and ensure each
+	 * firmware load starts on a clean slate.
+	 * For targets which do not need to reset the core_clk, clock
+	 * driver returns -EPERM. Do not consider such cases as erroneous.
+	 */
+	dprintk(VIDC_DBG, "%s core-clk\n",
+		action == CLK_RESET_DEASSERT ? "de-assert" : "assert");
+	vc = __get_clock(device, "core_clk");
+	if (vc) {
+		rc = clk_reset(vc->clk, action);
+		if (rc == -EPERM) {
+			rc = 0;
+			dprintk(VIDC_DBG, "%s No need to reset\n", __func__);
+		} else if (rc) {
+			dprintk(VIDC_ERR,
+				"clk_reset action - %d failed: %d\n",
+				action, rc);
+			return rc;
+		}
+	} else {
+		return -EINVAL;
+	}
+	udelay(1);
+	return rc;
+}
+
 static int __enable_regulators(struct venus_hfi_device *device)
 {
 	int rc = 0, c = 0;
 	struct regulator_info *rinfo;
+
+	rc = __core_clk_reset(device, CLK_RESET_DEASSERT);
+	if (rc)
+		return rc;
+
 
 	dprintk(VIDC_DBG, "Enabling regulators\n");
 
@@ -3977,6 +4152,8 @@ static int __disable_regulators(struct venus_hfi_device *device)
 
 	venus_hfi_for_each_regulator_reverse(device, rinfo)
 		__disable_regulator(rinfo);
+
+	rc = __core_clk_reset(device, CLK_RESET_ASSERT);
 
 	return rc;
 }
@@ -4088,7 +4265,8 @@ static inline int __suspend(struct venus_hfi_device *device)
 
 	dprintk(VIDC_DBG, "Entering power collapse\n");
 
-	pm_qos_remove_request(&device->qos);
+	if (device->res->pm_qos_latency_us)
+		pm_qos_remove_request(&device->qos);
 
 	rc = __tzbsp_set_video_state(TZBSP_VIDEO_STATE_SUSPEND);
 	if (rc) {
@@ -4234,9 +4412,15 @@ static void __unload_fw(struct venus_hfi_device *device)
 	cancel_delayed_work(&venus_hfi_pm_work);
 	if (device->state != VENUS_STATE_DEINIT)
 		flush_workqueue(device->venus_pm_workq);
-	__halt_axi(device);
 
-	__vote_buses(device, NULL, 0);
+	/*
+	 * If the core_clk is asserted, then PIL cannot enable
+	 * any of the venus clocks. So deassert the clock before
+	 * calling subsystem_put.
+	 */
+	if (__core_clk_reset(device, CLK_RESET_DEASSERT))
+		dprintk(VIDC_ERR, "failed to deassert core_clk\n");
+
 	subsystem_put(device->resources.fw.cookie);
 	__interface_queues_release(device);
 	__venus_power_off(device, false);
@@ -4280,7 +4464,7 @@ static int venus_hfi_get_fw_info(void *dev, struct hal_fw_info *fw_info)
 		goto fail_version_string;
 	}
 
-	for (i--; i < VENUS_VERSION_LENGTH && j < VENUS_VERSION_LENGTH; i++)
+	for (i--; i < VENUS_VERSION_LENGTH && j < VENUS_VERSION_LENGTH - 1; i++)
 		fw_info->version[j++] = version[i];
 	fw_info->version[j] = '\0';
 

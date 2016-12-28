@@ -83,6 +83,9 @@ static struct device *sec_touchkey;
 /* Force FW update if module# is different */
 #define FORCE_FW_UPDATE_DIFF_MODULE
 
+/* Support Glove Mode */
+#define GLOVE_MODE
+
 /* Touchkey LED twinkle during booting in factory sw (in LCD detached status) */
 #ifdef CONFIG_SEC_FACTORY
 #define LED_TWINKLE_BOOTING
@@ -168,6 +171,7 @@ struct abov_touchkey_dt_data {
 	int sub_det;
 	int gpio_tkey_led_en;
 	bool reg_boot_on;
+	bool forced_update;
 	struct regulator *vdd_io_vreg;
 	struct regulator *avdd_vreg;
 	int (*power) (struct abov_touchkey_dt_data *dtdata, bool on);
@@ -1119,10 +1123,10 @@ static ssize_t abov_glove_mode(struct device *dev,
 	}
 
 	if (scan_buffer == 1) {
-		dev_notice(&client->dev, "%s glove mode\n", __func__);
+		dev_info(&client->dev, "%s glove mode\n", __func__);
 		cmd = CMD_GLOVE_ON;
 	} else {
-		dev_notice(&client->dev, "%s normal mode\n", __func__);
+		dev_info(&client->dev, "%s normal mode\n", __func__);
 		cmd = CMD_GLOVE_OFF;
 	}
 
@@ -1323,6 +1327,12 @@ static int abov_tk_fw_check(struct abov_tk_info *info)
 		return -1;
 	}
 	abov_release_fw(info, BUILT_IN);
+
+	if ((info->dtdata->forced_update) && (info->fw_ver != info->fw_ver_bin)) {
+		dev_err(&client->dev,
+			"define forced update(not equal & forced). Do force FW update\n");
+		force = true;
+	}
 
 #ifdef FORCE_FW_UPDATE_DIFF_MODULE
 	if (info->md_ver != info->md_ver_bin) {
@@ -1542,11 +1552,13 @@ static int abov_parse_dt(struct device *dev,
 		return rc;
 	}
 
+	dtdata->forced_update = of_property_read_bool(np, "abov,forced-update");
 	dev_info(dev, "%s: gpio_int:%d, gpio_scl:%d,"
-		" gpio_sda:%d, gpio_led_en:%d, reg_boot_on:%d, fw_name:%s\n",
+		" gpio_sda:%d, gpio_led_en:%d, reg_boot_on:%d, fw_name:%s, %s\n",
 			__func__, dtdata->gpio_int, dtdata->gpio_scl,
 			dtdata->gpio_sda, dtdata->gpio_tkey_led_en,
-			dtdata->reg_boot_on, dtdata->fw_name);
+			dtdata->reg_boot_on, dtdata->fw_name,
+			dtdata->forced_update ? "F" : "");
 
 	return 0;
 }

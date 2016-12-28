@@ -771,13 +771,9 @@ out:
 	kfree(n);
 	kfree(t);
 
-#ifdef CONFIG_SECURITY_SELINUX_ALWAYS_ENFORCE
-	return -EPERM;
-#else
 	if (!selinux_enforcing)
 		return 0;
 	return -EPERM;
-#endif
 }
 
 int security_validate_transition(u32 oldsid, u32 newsid, u32 tasksid,
@@ -1527,13 +1523,9 @@ out:
 	kfree(t);
 	kfree(n);
 
-#ifdef CONFIG_SECURITY_SELINUX_ALWAYS_ENFORCE
-	return -EACCES;
-#else
 	if (!selinux_enforcing)
 		return 0;
 	return -EACCES;
-#endif
 }
 
 static void filename_compute_type(struct policydb *p, struct context *newcontext,
@@ -1822,9 +1814,6 @@ static inline int convert_context_handle_invalid_context(struct context *context
 	char *s;
 	u32 len;
 
-#ifdef CONFIG_SECURITY_SELINUX_ALWAYS_ENFORCE
-	return -EINVAL;
-#else
 	if (selinux_enforcing)
 		return -EINVAL;
 
@@ -1833,7 +1822,6 @@ static inline int convert_context_handle_invalid_context(struct context *context
 		kfree(s);
 	}
 	return 0;
-#endif
 }
 
 struct convert_context_args {

@@ -117,6 +117,10 @@
 
 static struct msm_thermal_data msm_thermal_info;
 static struct delayed_work check_temp_work, retry_hotplug_work;
+#if CONFIG_SEC_PM_DEBUG
+static struct delayed_work ts_print_work;
+static int ts_print[] = {4, 6, 9, 11, 15};
+#endif
 static bool core_control_enabled;
 static uint32_t cpus_offlined;
 static cpumask_var_t cpus_previously_online;
@@ -1373,8 +1377,8 @@ static int get_cpu_freq_plan(int cpu,
 
 	rcu_read_lock();
 	while (!IS_ERR(opp = dev_pm_opp_find_freq_ceil(cpu_dev, &freq))) {
-		/* Convert from Hz to kHz */ 
-		freq_table_ptr[table_len].frequency = freq / 1000; 
+		/* Convert from Hz to kHz */
+		freq_table_ptr[table_len].frequency = freq / 1000;
 		pr_debug("cpu%d freq %d :%d\n", cpu, table_len,
 			freq_table_ptr[table_len].frequency);
 		freq++;
@@ -2633,6 +2637,9 @@ static void msm_thermal_bite(int zone_id, long temp)
 	int tsens_id = 0;
 	int ret = 0;
 
+
+	sec_debug_set_thermal_upload();
+
 	ret = zone_id_to_tsen_id(zone_id, &tsens_id);
 	if (ret < 0) {
 		pr_err("Zone:%d reached temperature:%ld. Err = %d System reset\n",
@@ -2650,6 +2657,13 @@ static void msm_thermal_bite(int zone_id, long temp)
 				 THERM_SECURE_BITE_CMD), &desc);
 	}
 }
+#ifdef CONFIG_USER_RESET_DEBUG_TEST
+void force_thermal_reset(void)
+{
+	msm_thermal_bite(0, msm_thermal_info.therm_reset_temp_degC);
+}
+EXPORT_SYMBOL(force_thermal_reset);
+#endif
 
 static int do_therm_reset(void)
 {
@@ -3353,6 +3367,29 @@ reschedule:
 		schedule_delayed_work(&check_temp_work,
 				msecs_to_jiffies(msm_thermal_info.poll_ms));
 }
+
+#if CONFIG_SEC_PM_DEBUG
+static void __ref msm_ts_print(struct work_struct *work)
+{
+	struct tsens_device tsens_dev;
+	long temp = 0;
+	int i = 0, added = 0, ret = 0;
+	char buffer[500] = { 0, };
+
+	ret = sprintf(buffer + added, "tsens");
+	added += ret;
+	for (i = 0; i < (sizeof(ts_print) / sizeof(int)); i++) {
+		tsens_dev.sensor_num = ts_print[i];
+		tsens_get_temp(&tsens_dev, &temp);
+		ret = sprintf(buffer + added, "[%d:%ld]", ts_print[i], temp);
+		added += ret;
+	}
+	pr_info("%s\n", buffer);
+
+	/* For every 5s log the temperature values of all the msm tsens */
+	schedule_delayed_work(&ts_print_work, HZ * 5);
+}
+#endif
 
 static int __ref msm_thermal_cpu_callback(struct notifier_block *nfb,
 		unsigned long action, void *hcpu)
@@ -6995,6 +7032,10 @@ static int msm_thermal_dev_exit(struct platform_device *inp_dev)
 	if (msm_therm_debugfs && msm_therm_debugfs->parent)
 		debugfs_remove_recursive(msm_therm_debugfs->parent);
 	msm_thermal_ioctl_cleanup();
+#if CONFIG_SEC_PM_DEBUG
+	cancel_delayed_work_sync(&ts_print_work);
+#endif
+
 	if (thresh) {
 		if (vdd_rstr_enabled) {
 			sensor_mgr_remove_threshold(
@@ -7086,6 +7127,11 @@ static struct platform_driver msm_thermal_device_driver = {
 
 int __init msm_thermal_device_init(void)
 {
+#if CONFIG_SEC_PM_DEBUG
+	INIT_DELAYED_WORK(&ts_print_work, msm_ts_print);
+	schedule_delayed_work(&ts_print_work, (HZ * 2));
+#endif
+
 	return platform_driver_register(&msm_thermal_device_driver);
 }
 arch_initcall(msm_thermal_device_init);

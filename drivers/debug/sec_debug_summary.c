@@ -68,6 +68,29 @@ int sec_debug_save_die_info(const char *str, struct pt_regs *regs)
 	snprintf(secdbg_apss->excp.lr_sym, sizeof(secdbg_apss->excp.lr_sym),
 		"%pS", (void *)regs->ARM_PT_REG_LR);
 
+#ifdef CONFIG_USER_RESET_DEBUG
+	if (sec_debug_reset_ex_info) {
+		if (!sec_debug_reset_ex_info->tsk) {
+			int slen;
+			char *msg;
+
+			sec_debug_reset_ex_info->ktime = local_clock();
+			snprintf(sec_debug_reset_ex_info->pc,
+				sizeof(sec_debug_reset_ex_info->pc), "%pS", (void *)regs->ARM_PT_REG_PC);
+			snprintf(sec_debug_reset_ex_info->lr,
+				sizeof(sec_debug_reset_ex_info->lr), "%pS", (void *)regs->ARM_PT_REG_LR);
+			slen = snprintf(sec_debug_reset_ex_info->panic_buf,
+				sizeof(sec_debug_reset_ex_info->panic_buf), "%s", str);
+
+			msg = sec_debug_reset_ex_info->panic_buf;
+
+			if ((slen >= 1) && (msg[slen-1] == '\n'))
+				msg[slen-1] = 0;
+
+			sec_debug_reset_ex_info->tsk = current;
+		}
+	}
+#endif
 	return 0;
 }
 
@@ -82,7 +105,27 @@ int sec_debug_save_panic_info(const char *str, unsigned long caller)
 	snprintf(secdbg_apss->excp.thread,
 		sizeof(secdbg_apss->excp.thread), "%s:%d", current->comm,
 		task_pid_nr(current));
+#ifdef CONFIG_USER_RESET_DEBUG
+	if (sec_debug_reset_ex_info) {
+		if (!sec_debug_reset_ex_info->tsk) {
+			int slen;
+			char *msg;
 
+			sec_debug_reset_ex_info->ktime = local_clock();
+			snprintf(sec_debug_reset_ex_info->lr,
+				sizeof(sec_debug_reset_ex_info->lr), "%pS", (void *)caller);
+			slen = snprintf(sec_debug_reset_ex_info->panic_buf,
+				sizeof(sec_debug_reset_ex_info->panic_buf), "%s", str);
+
+			msg = sec_debug_reset_ex_info->panic_buf;
+
+			if ((slen >= 1) && (msg[slen-1] == '\n'))
+				msg[slen-1] = 0;
+
+			sec_debug_reset_ex_info->tsk = current;
+		}
+	}
+#endif
 	return 0;
 }
 
@@ -110,7 +153,7 @@ int sec_debug_summary_add_varmon(char *name, unsigned int size, uint64_t pa)
 	if (!secdbg_apss)
 		return -ENOMEM;
 
-	if (secdbg_apss->var_mon.idx > ARRAY_SIZE(secdbg_apss->var_mon.var))
+	if (secdbg_apss->var_mon.idx >= ARRAY_SIZE(secdbg_apss->var_mon.var))
 		return -ENOMEM;
 
 	strlcpy(secdbg_apss->var_mon.var[secdbg_apss->var_mon.idx].name, name,

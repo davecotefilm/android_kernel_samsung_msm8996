@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -56,7 +56,6 @@
 
 #define MDP_PP_AD_BL_LINEAR	0x0
 #define MDP_PP_AD_BL_LINEAR_INV	0x1
-#define MAX_LAYER_COUNT		0xC
 
 /**
  * enum mdp_notify_event - Different frame events to indicate frame update state
@@ -130,15 +129,15 @@ enum mdp_mmap_type {
  * enum dyn_mode_switch_state - Lists next stage for dynamic mode switch work
  *
  * @MDSS_MDP_NO_UPDATE_REQUESTED: incoming frame is processed normally
- * @MDSS_MDP_WAIT_FOR_PREP: Waiting for OVERLAY_PREPARE to be called
- * @MDSS_MDP_WAIT_FOR_SYNC: Waiting for BUFFER_SYNC to be called
- * @MDSS_MDP_WAIT_FOR_COMMIT: Waiting for COMMIT to be called
+ * @MDSS_MDP_WAIT_FOR_VALIDATE: Waiting for ATOMIC_COMMIT-validate to be called
+ * @MDSS_MDP_WAIT_FOR_COMMIT: Waiting for ATOMIC_COMMIT-commit to be called
+ * @MDSS_MDP_WAIT_FOR_KICKOFF: Waiting for KICKOFF to be called
  */
 enum dyn_mode_switch_state {
 	MDSS_MDP_NO_UPDATE_REQUESTED,
-	MDSS_MDP_WAIT_FOR_PREP,
-	MDSS_MDP_WAIT_FOR_SYNC,
+	MDSS_MDP_WAIT_FOR_VALIDATE,
 	MDSS_MDP_WAIT_FOR_COMMIT,
+	MDSS_MDP_WAIT_FOR_KICKOFF,
 };
 
 /**
@@ -272,7 +271,7 @@ struct msm_fb_data_type {
 
 	int idle_time;
 	u32 idle_state;
-	struct delayed_work idle_notify_work;		
+	struct delayed_work idle_notify_work;
 
 	bool validate_pending;
 
@@ -358,6 +357,7 @@ struct msm_fb_data_type {
 	bool pending_switch;
 	struct mutex switch_lock;
 	struct input_handler *input_handler;
+	bool force_revalidate;
 };
 
 static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)

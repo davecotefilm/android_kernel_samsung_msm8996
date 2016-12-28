@@ -1993,7 +1993,7 @@ static void ipa3_fast_replenish_rx_cache(struct ipa3_sys_context *sys)
 
 	queue_work(sys->repl_wq, &sys->repl_work);
 
-	if (rx_len_cached == 0) {
+	if (rx_len_cached <= 32) {
 		if (sys->ep->client == IPA_CLIENT_APPS_WAN_CONS)
 			IPA_STATS_INC_CNT(ipa3_ctx->stats.wan_rx_empty);
 		else if (sys->ep->client == IPA_CLIENT_APPS_LAN_CONS)
@@ -2760,6 +2760,8 @@ static int ipa3_assign_policy(struct ipa_sys_connect_params *in,
 				sys->pyld_hdlr = ipa3_wan_rx_pyld_hdlr;
 				sys->rx_pool_sz =
 					ipa3_ctx->wan_rx_ring_size;
+				in->ipa_ep_cfg.aggr.aggr_sw_eof_active
+					= true;
 			}
 			if (nr_cpu_ids > 1)
 				sys->repl_hdlr =
@@ -2786,7 +2788,6 @@ static int ipa3_assign_policy(struct ipa_sys_connect_params *in,
 			if (sys->rx_pool_sz > IPA_WLAN_RX_POOL_SZ)
 				sys->rx_pool_sz = IPA_WLAN_RX_POOL_SZ;
 			sys->pyld_hdlr = NULL;
-			sys->repl_hdlr = ipa3_replenish_wlan_rx_cache;
 			sys->get_skb = ipa3_get_skb_ipa_rx;
 			sys->free_skb = ipa3_free_skb_rx;
 			in->ipa_ep_cfg.aggr.aggr_en = IPA_BYPASS_AGGR;

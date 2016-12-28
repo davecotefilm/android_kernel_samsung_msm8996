@@ -16,22 +16,28 @@
 #include <linux/module.h>
 #include "adsp.h"
 #define VENDOR "AMS"
+#ifdef CONFIG_SUPPORT_TMD4904_FACTORY
+#define CHIP_ID "TMD4904"
+#else
 #define CHIP_ID "TMD4903"
+#endif
 
 #define RAWDATA_TIMER_MS 200
 #define RAWDATA_TIMER_MARGIN_MS	20
-#define PROX_AVG_COUNT	80
-#define PROX_AVG_COUNT_THD 79
+#define PROX_AVG_COUNT	40
+#define PROX_ALERT_THRESHOLD 200
 
 struct tmd4903_prox_data {
-	short prox_data[PROX_AVG_COUNT];
-	short prox_data_idx;
+	struct hrtimer prox_timer;
+	struct work_struct work_prox;
+	struct workqueue_struct *prox_wq;
+	int min;
+	int max;
+	int avg;
+	int val;
+	short avgwork_check;
+	short avgtimer_enabled;
 	short bBarcodeEnabled;
-	short min;
-	short max;
-	short avg;
-	short dummy;
-	int sum;
 };
 static struct tmd4903_prox_data *pdata;
 
@@ -52,6 +58,9 @@ static ssize_t prox_state_show(struct device *dev,
 {
 	struct adsp_data *data = dev_get_drvdata(dev);
 
+	if (pdata->avgwork_check == 1)
+		return snprintf(buf, PAGE_SIZE, "%d\n", pdata->val);
+
 	if (adsp_start_raw_data(ADSP_FACTORY_PROX) == false)
 		return snprintf(buf, PAGE_SIZE, "%d\n", 0);
 
@@ -63,41 +72,13 @@ static ssize_t prox_raw_data_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct adsp_data *data = dev_get_drvdata(dev);
-	short i;
+
+	if (pdata->avgwork_check == 1)
+		return snprintf(buf, PAGE_SIZE, "%d\n", pdata->val);
 
 	if (adsp_start_raw_data(ADSP_FACTORY_PROX) == false)
 		return snprintf(buf, PAGE_SIZE, "%d\n", 0);
-#if 1
-	if (pdata->prox_data_idx > PROX_AVG_COUNT_THD) {
-		pdata->prox_data_idx = 0;
-		pdata->sum = 0;
-		pdata->min = 0x7FFF;
-		pdata->max = 0;
 
-		for (i = 0; i < PROX_AVG_COUNT; i++) {
-			pdata->min = min(pdata->min, pdata->prox_data[i]);
-			pdata->max = max(pdata->max, pdata->prox_data[i]);
-		}
-	}
-	pdata->prox_data[pdata->prox_data_idx] = data->sensor_data[ADSP_FACTORY_PROX].prox;
-	pdata->sum += pdata->prox_data[pdata->prox_data_idx];
-
-	if (pdata->prox_data_idx == PROX_AVG_COUNT_THD)
-		pdata->avg = pdata->sum / PROX_AVG_COUNT;
-
-	pdata->prox_data_idx++;
-#else
-	pdata->prox_data_idx = (pdata->prox_data_idx+1)%PROX_AVG_COUNT;
-	pdata->sum += data->sensor_data[ADSP_FACTORY_PROX].prox - pdata->prox_data[pdata->prox_data_idx];
-	pdata->prox_data[pdata->prox_data_idx] = data->sensor_data[ADSP_FACTORY_PROX].prox;
-
-	pdata->min = 0x7FFF;
-	pdata->max = 0;
-	for (i = 0; i < PROX_AVG_COUNT; i++) {
-		pdata->min = min(pdata->min, pdata->prox_data[i]);
-		pdata->max = max(pdata->max, pdata->prox_data[i]);
-	}
-#endif
 	return snprintf(buf, PAGE_SIZE, "%u\n",
 		data->sensor_data[ADSP_FACTORY_PROX].prox);
 }
@@ -112,8 +93,68 @@ static ssize_t prox_avg_show(struct device *dev,
 static ssize_t prox_avg_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
+	int new_value;
+
+	if (sysfs_streq(buf, "0"))
+		new_value = 0;
+	else
+		new_value = 1;
+
+	if (new_value == pdata->avgtimer_enabled)
+		return size;
+
+	if (new_value == 0) {
+		pdata->avgtimer_enabled = 0;
+		hrtimer_cancel(&pdata->prox_timer);
+		cancel_work_sync(&pdata->work_prox);
+	} else {
+		pdata->avgtimer_enabled = 1;
+		hrtimer_start(&pdata->prox_timer,
+			ns_to_ktime(2000 * NSEC_PER_MSEC),
+			HRTIMER_MODE_REL);
+	}
+
 	return size;
 }
+
+static void prox_work_func(struct work_struct *work)
+{
+	int min = 0, max = 0, avg = 0;
+	int i;
+
+	pdata->avgwork_check = 1;
+	for (i = 0; i < PROX_AVG_COUNT; i++) {
+		msleep(20);
+		if (adsp_start_raw_data(ADSP_FACTORY_PROX) == false)
+			continue;
+		pdata->val = adsp_get_sensor_data(ADSP_FACTORY_PROX);
+
+		avg += pdata->val;
+
+		if (!i)
+			min = pdata->val;
+		else if (pdata->val < min)
+			min = pdata->val;
+
+		if (pdata->val > max)
+			max = pdata->val;
+	}
+	avg /= PROX_AVG_COUNT;
+
+	pdata->min = min;
+	pdata->avg = avg;
+	pdata->max = max;
+	pdata->avgwork_check = 0;
+}
+
+static enum hrtimer_restart prox_timer_func(struct hrtimer *timer)
+{
+	queue_work(pdata->prox_wq, &pdata->work_prox);
+	hrtimer_forward_now(&pdata->prox_timer,
+		ns_to_ktime(2000 * NSEC_PER_MSEC));
+	return HRTIMER_RESTART;
+}
+
 
 static ssize_t prox_cancel_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -191,9 +232,14 @@ static ssize_t prox_thresh_high_show(struct device *dev,
 		data->sensor_calib_data[ADSP_FACTORY_PROX].threHi,
 		data->sensor_calib_data[ADSP_FACTORY_PROX].threLo);
 
+#ifdef CONFIG_SUPPORT_TMD4904_FACTORY
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+		data->sensor_calib_data[ADSP_FACTORY_PROX].threHi);
+#else
 	return snprintf(buf, PAGE_SIZE, "%d,%d\n",
 		data->sensor_calib_data[ADSP_FACTORY_PROX].threHi,
 		data->sensor_calib_data[ADSP_FACTORY_PROX].threLo);
+#endif
 }
 
 static ssize_t prox_thresh_high_store(struct device *dev,
@@ -234,9 +280,14 @@ static ssize_t prox_thresh_low_show(struct device *dev,
 		data->sensor_calib_data[ADSP_FACTORY_PROX].threHi,
 		data->sensor_calib_data[ADSP_FACTORY_PROX].threLo);
 
+#ifdef CONFIG_SUPPORT_TMD4904_FACTORY
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+		data->sensor_calib_data[ADSP_FACTORY_PROX].threLo);
+#else
 	return snprintf(buf, PAGE_SIZE, "%d,%d\n",
 		data->sensor_calib_data[ADSP_FACTORY_PROX].threHi,
 		data->sensor_calib_data[ADSP_FACTORY_PROX].threLo);
+#endif
 }
 
 static ssize_t prox_thresh_low_store(struct device *dev,
@@ -305,6 +356,14 @@ static ssize_t prox_default_trim_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct adsp_data *data = dev_get_drvdata(dev);
+
+#ifdef CONFIG_SUPPORT_PROX_AUTO_CAL
+	pr_info("[FACTORY] %s: %d\n", __func__,
+		data->sensor_data[ADSP_FACTORY_PROX].offset);
+
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+		data->sensor_data[ADSP_FACTORY_PROX].offset);
+#else
 	struct msg_data message;
 
 	message.sensor_type = ADSP_FACTORY_PROX;
@@ -320,6 +379,103 @@ static ssize_t prox_default_trim_show(struct device *dev,
 
 	return snprintf(buf, PAGE_SIZE, "%d\n",
 		data->sensor_calib_data[ADSP_FACTORY_PROX].trim);
+#endif
+}
+
+#ifdef CONFIG_SUPPORT_PROX_AUTO_CAL
+static ssize_t prox_thresh_detect_high_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct adsp_data *data = dev_get_drvdata(dev);
+	struct msg_data message;
+
+	message.sensor_type = ADSP_FACTORY_PROX;
+	adsp_unicast(&message, sizeof(message),
+		NETLINK_MESSAGE_GET_CALIB_DATA, 0, 0);
+
+	while (!(data->calib_ready_flag & 1 << ADSP_FACTORY_PROX))
+		msleep(20);
+
+	data->calib_ready_flag &= 0 << ADSP_FACTORY_PROX;
+
+	pr_info("[FACTORY] %s: %d,%d\n", __func__,
+		data->sensor_calib_data[ADSP_FACTORY_PROX].threDetectHi,
+		data->sensor_calib_data[ADSP_FACTORY_PROX].threDetectLo);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+		data->sensor_calib_data[ADSP_FACTORY_PROX].threDetectHi);
+}
+
+static ssize_t prox_thresh_detect_high_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct msg_big_data message;
+	int thd = 0;
+
+	if (kstrtoint(buf, 10, &thd)) {
+		pr_err("[FACTORY] %s: kstrtoint fail\n", __func__);
+		return -EINVAL;
+	}
+
+	message.sensor_type = ADSP_FACTORY_PROX;
+	message.msg_size = 4;
+	message.int_msg[0] = thd;
+	msleep(RAWDATA_TIMER_MS + RAWDATA_TIMER_MARGIN_MS);
+	adsp_unicast(&message, sizeof(message),
+		NETLINK_MESSAGE_THD_DETECT_HI_STORE_DATA, 0, 0);
+
+	return size;
+}
+
+static ssize_t prox_thresh_detect_low_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct adsp_data *data = dev_get_drvdata(dev);
+	struct msg_data message;
+
+	message.sensor_type = ADSP_FACTORY_PROX;
+	adsp_unicast(&message, sizeof(message),
+		NETLINK_MESSAGE_GET_CALIB_DATA, 0, 0);
+
+	while (!(data->calib_ready_flag & 1 << ADSP_FACTORY_PROX))
+		msleep(20);
+
+	data->calib_ready_flag &= 0 << ADSP_FACTORY_PROX;
+
+	pr_info("[FACTORY] %s: %d,%d\n", __func__,
+		data->sensor_calib_data[ADSP_FACTORY_PROX].threDetectHi,
+		data->sensor_calib_data[ADSP_FACTORY_PROX].threDetectLo);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+		data->sensor_calib_data[ADSP_FACTORY_PROX].threDetectLo);
+}
+
+static ssize_t prox_thresh_detect_low_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct msg_big_data message;
+	int thd = 0;
+
+	if (kstrtoint(buf, 10, &thd)) {
+		pr_err("[FACTORY] %s: kstrtoint fail\n", __func__);
+		return -EINVAL;
+	}
+
+	message.sensor_type = ADSP_FACTORY_PROX;
+	message.msg_size = 4;
+	message.int_msg[0] = thd;
+	msleep(RAWDATA_TIMER_MS + RAWDATA_TIMER_MARGIN_MS);
+	adsp_unicast(&message, sizeof(message),
+		NETLINK_MESSAGE_THD_DETECT_LO_STORE_DATA, 0, 0);
+
+	return size;
+}
+#endif
+
+static ssize_t prox_alert_thresh_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", PROX_ALERT_THRESHOLD);
 }
 
 static DEVICE_ATTR(vendor, S_IRUGO, prox_vendor_show, NULL);
@@ -339,6 +495,14 @@ static DEVICE_ATTR(barcode_emul_en, S_IRUGO | S_IWUSR | S_IWGRP,
 static DEVICE_ATTR(prox_offset_pass, S_IRUGO, prox_cancel_pass_show, NULL);
 static DEVICE_ATTR(prox_trim, S_IRUGO, prox_default_trim_show, NULL);
 
+#ifdef CONFIG_SUPPORT_PROX_AUTO_CAL
+static DEVICE_ATTR(thresh_detect_high, S_IRUGO | S_IWUSR | S_IWGRP,
+	prox_thresh_detect_high_show, prox_thresh_detect_high_store);
+static DEVICE_ATTR(thresh_detect_low, S_IRUGO | S_IWUSR | S_IWGRP,
+	prox_thresh_detect_low_show, prox_thresh_detect_low_store);
+#endif
+static DEVICE_ATTR(prox_alert_thresh, S_IRUGO, prox_alert_thresh_show, NULL);
+
 static struct device_attribute *prox_attrs[] = {
 	&dev_attr_vendor,
 	&dev_attr_name,
@@ -351,6 +515,11 @@ static struct device_attribute *prox_attrs[] = {
 	&dev_attr_barcode_emul_en,
 	&dev_attr_prox_offset_pass,
 	&dev_attr_prox_trim,
+#ifdef CONFIG_SUPPORT_PROX_AUTO_CAL
+	&dev_attr_thresh_detect_high,
+	&dev_attr_thresh_detect_low,
+#endif
+	&dev_attr_prox_alert_thresh,
 	NULL,
 };
 
@@ -359,8 +528,17 @@ static int __init tmd490x_prox_factory_init(void)
 	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
 	adsp_factory_register(ADSP_FACTORY_PROX, prox_attrs);
 	pr_info("[FACTORY] %s\n", __func__);
-	pdata->prox_data_idx = 0;
-	pdata->sum = 0;
+
+	hrtimer_init(&pdata->prox_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	pdata->prox_timer.function = prox_timer_func;
+	pdata->prox_wq = create_singlethread_workqueue("prox_wq");
+
+ 	/* this is the thread function we run on the work queue */
+	INIT_WORK(&pdata->work_prox, prox_work_func);
+
+	pdata->avgwork_check = 0;
+	pdata->avgtimer_enabled = 0;
+	pdata->avg = 0;
 	pdata->min = 0;
 	pdata->max = 0;
 	return 0;
@@ -368,6 +546,11 @@ static int __init tmd490x_prox_factory_init(void)
 
 static void __exit tmd490x_prox_factory_exit(void)
 {
+	if (pdata->avgtimer_enabled == 1) {
+		hrtimer_cancel(&pdata->prox_timer);
+		cancel_work_sync(&pdata->work_prox);
+	}
+	destroy_workqueue(pdata->prox_wq);
 	adsp_factory_unregister(ADSP_FACTORY_PROX);
 	kfree(pdata);
 	pr_info("[FACTORY] %s\n", __func__);

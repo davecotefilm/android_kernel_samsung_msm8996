@@ -180,11 +180,16 @@ enum {
 	DVFS_NO_ID			= 0,
 
 	/* need to update now */
-	DVFS_TOUCH_ID			= 0x00000001,
-	DVFS_FINGER_ID			= 0x00000002,
+	DVFS_TOUCH_ID			= 1,
+	DVFS_FINGER_ID			= 2,
+	DVFS_MULTI_TOUCH_ID		= 3,
 
 	DVFS_MAX_ID
 };
+
+#define DVFS_TOUCH_ID_MASK (1 << DVFS_TOUCH_ID)
+#define DVFS_FINGER_ID_MASK (1 << DVFS_FINGER_ID)
+#define DVFS_MULTI_TOUCH_ID_MASK (1 << DVFS_MULTI_TOUCH_ID)
 
 int set_freq_limit(unsigned long id, unsigned int freq);
 #endif

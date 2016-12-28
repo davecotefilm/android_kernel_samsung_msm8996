@@ -30,6 +30,8 @@ enum ion_heap_ids {
 	ION_SECURE_DISPLAY_HEAP_ID = 10,
 	ION_CP_MFC_HEAP_ID = 12,
 	ION_CP_WB_HEAP_ID = 16, /* 8660 only */
+	ION_SECURE_CAMERA_HEAP_ID = 17,
+	ION_SECURE_CAMERA_SCRATCH_HEAP_ID = 18,
 	ION_SYSTEM_CONTIG_HEAP_ID = 21,
 	ION_ADSP_HEAP_ID = 22,
 	ION_PIL1_HEAP_ID = 23, /* Currently used for other PIL images */
@@ -107,6 +109,9 @@ enum cp_mem_usage {
  */
 #define ION_FLAG_POOL_FORCE_ALLOC (1 << 16)
 
+
+#define ION_FLAG_POOL_PREFETCH (1 << 27)
+
 /**
 * Deprecated! Please use the corresponding ION_FLAG_*
 */
@@ -135,6 +140,8 @@ enum cp_mem_usage {
 #define ION_QSECOM_HEAP_NAME	"qsecom"
 #define ION_SECURE_HEAP_NAME	"secure_heap"
 #define ION_SECURE_DISPLAY_HEAP_NAME "secure_display"
+#define ION_SECURE_CAMERA_HEAP_NAME "secure_camera"
+#define ION_SECURE_CAMERA_SCRATCH_HEAP_NAME "secure_camera_scratch"
 
 #define ION_SET_CACHED(__cache)		(__cache | ION_FLAG_CACHED)
 #define ION_SET_UNCACHED(__cache)	(__cache & ~ION_FLAG_CACHED)
@@ -161,10 +168,18 @@ struct ion_flush_data {
 	unsigned int length;
 };
 
+struct ion_prefetch_regions {
+	unsigned int vmid;
+	size_t __user *sizes;
+	unsigned int nr_sizes;
+};
 
 struct ion_prefetch_data {
 	int heap_id;
 	unsigned long len;
+	/* Is unsigned long bad? 32bit compiler vs 64 bit compiler*/
+	struct ion_prefetch_regions __user *regions;
+	unsigned int nr_regions;
 };
 
 #define ION_IOC_MSM_MAGIC 'M'

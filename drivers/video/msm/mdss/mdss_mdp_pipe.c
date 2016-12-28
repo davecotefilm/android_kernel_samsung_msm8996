@@ -2015,6 +2015,8 @@ static int mdss_mdp_format_setup(struct mdss_mdp_pipe *pipe)
 	mdss_mdp_pipe_write(pipe, MDSS_MDP_REG_SSPP_SRC_OP_MODE, opmode);
 	mdss_mdp_pipe_write(pipe, MDSS_MDP_REG_SSPP_SRC_ADDR_SW_STATUS, secure);
 
+	MDSS_XLOG(secure, mdss_mdp_pipe_read(pipe,MDSS_MDP_REG_SSPP_SRC_ADDR_SW_STATUS));
+
 	/* clear UBWC error */
 	mdss_mdp_pipe_write(pipe, MDSS_MDP_REG_SSPP_UBWC_ERROR_STATUS, BIT(31));
 
@@ -2204,7 +2206,7 @@ int mdss_mdp_pipe_queue_data(struct mdss_mdp_pipe *pipe,
 	params_changed = (pipe->params_changed) ||
 		((pipe->type == MDSS_MDP_PIPE_TYPE_DMA) &&
 		 (pipe->mixer_left->type == MDSS_MDP_MIXER_TYPE_WRITEBACK) &&
-		 (ctl->mdata->mixer_switched)) || roi_changed ||(ctl->power_state==MDSS_PANEL_POWER_LP1); 
+		 (ctl->mdata->mixer_switched)) || roi_changed ||(ctl->power_state==MDSS_PANEL_POWER_LP1);
 
 	if (params_changed) {
 		bool is_realtime = !((ctl->intf_num == MDSS_MDP_NO_INTF)

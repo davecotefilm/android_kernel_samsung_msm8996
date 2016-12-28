@@ -651,6 +651,7 @@ void diagfwd_close_transport(uint8_t transport, uint8_t peripheral)
 	fwd_info = &early_init_info[transport][peripheral];
 	if (fwd_info->p_ops && fwd_info->p_ops->close)
 		fwd_info->p_ops->close(fwd_info->ctxt);
+	mutex_lock(&driver->diagfwd_channel_mutex);
 	fwd_info = &early_init_info[transport_open][peripheral];
 	DIAG_LOG(DIAG_DEBUG_PERIPHERALS,"closed transport for trasnport type %d peripheral %d\n",transport_open,peripheral);
 	dest_info = &peripheral_info[TYPE_CNTL][peripheral];
@@ -671,6 +672,7 @@ void diagfwd_close_transport(uint8_t transport, uint8_t peripheral)
 	DIAG_LOG(DIAG_DEBUG_PERIPHERALS,"calling invalidate for dest_info%p and dest_info context%p\n",dest_info,dest_info->ctxt);
 	diagfwd_cntl_open(dest_info);
 	init_fn(peripheral);
+	mutex_unlock(&driver->diagfwd_channel_mutex);
 	diagfwd_queue_read(&peripheral_info[TYPE_DATA][peripheral]);
 	diagfwd_queue_read(&peripheral_info[TYPE_CMD][peripheral]);
 }

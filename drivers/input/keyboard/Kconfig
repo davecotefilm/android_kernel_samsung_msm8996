@@ -12,7 +12,7 @@ menuconfig INPUT_KEYBOARD
 
 if INPUT_KEYBOARD
 
-source "drivers/input/keyboard/cypress_touchkey_t/Kconfig"
+source "drivers/input/keyboard/cypress/Kconfig"
 
 config KEYBOARD_ADP5520
 	tristate "Keypad Support for ADP5520 PMIC"
@@ -199,6 +199,12 @@ config CERTIFY_HALL
 	help
 	  Enable Certify Hall Feature
 
+config FOLDER_HALL
+	bool "FOLDER HALL"
+	default n
+	help
+	  Enable FOLDER Hall Feature
+
 config KEYBOARD_GPIO
 	tristate "GPIO Buttons"
 	depends on GPIOLIB
@@ -274,6 +280,13 @@ config KEYBOARD_MATRIX
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called matrix_keypad.
+
+config SUPPORT_KEYPAD_LED
+	bool "SUPPORT KEYPAD LED"
+	depends on KEYBOARD_MATRIX
+	default n
+	help
+	  Say Y here to use the kaypad.
 
 config KEYBOARD_HIL_OLD
 	tristate "HP HIL keyboard support (simple driver)"
@@ -689,10 +702,21 @@ config KEYBOARD_CAP1106
 	  To compile this driver as a module, choose M here: the
 	  module will be called cap1106.
 
+config KEYBOARD_TC350K
+	tristate "Coreriver TC350K touchkey"
+	depends on I2C
+	help
+	  Say Y if you want use Coreriver TC300K chip as touchkey.
+
 config KEYBOARD_ABOV_TOUCH_FT16XX
 	tristate "Abov FT16XX touchkey"
 	depends on I2C
 	help
 	  Say Y here if you want to use ABOV MC96FT16XX chip as touchkey.
 
+config KEYBOARD_ABOV_TOUCH_FOLDER
+	tristate "Abov FT16XX touchkey"
+	depends on I2C
+	help
+	  Say Y here if you want to use ABOV MC96FT16XX chip as touchkey for folder model.
 endif

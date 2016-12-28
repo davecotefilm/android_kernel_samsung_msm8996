@@ -65,8 +65,10 @@ static inline void __pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmdp,
 static inline void __pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmdp,
                                   unsigned long addr)
 {
-	if (is_rkp_ro_page((unsigned long)pmdp))
+	if (is_rkp_ro_page((unsigned long)pmdp)) {
+		__flush_tlb_pgtable(tlb->mm, addr);
 		rkp_ro_free((void*)pmdp);
+	}
 	else {
 		__flush_tlb_pgtable(tlb->mm, addr);
 		tlb_remove_entry(tlb, virt_to_page(pmdp));

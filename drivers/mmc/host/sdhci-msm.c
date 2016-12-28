@@ -2969,10 +2969,13 @@ static void sdhci_msm_set_uhs_signaling(struct sdhci_host *host,
 #define MAX_TEST_BUS 60
 #define DRV_NAME "cmdq-host"
 #if 0
-static void sdhci_msm_cmdq_dump_debug_ram(struct sdhci_msm_host *msm_host)
+static void sdhci_msm_cmdq_dump_debug_ram(struct sdhci_host *host)
 {
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_msm_host *msm_host = pltfm_host->priv;
 	int i = 0;
-	struct cmdq_host *cq_host = mmc_cmdq_private(msm_host->mmc);
+	struct cmdq_host *cq_host = host->cq_host;
+
 	u32 version = readl_relaxed(msm_host->core_mem + CORE_MCI_VERSION);
 	u16 minor = version & CORE_VERSION_TARGET_MASK;
 	/* registers offset changed starting from 4.2.0 */
@@ -3005,7 +3008,7 @@ void sdhci_msm_dump_vendor_regs(struct sdhci_host *host)
 	pr_info("----------- VENDOR REGISTER DUMP -----------\n");
 #if 0
 	if (host->cq_host)
-		sdhci_msm_cmdq_dump_debug_ram(msm_host);
+		sdhci_msm_cmdq_dump_debug_ram(host);
 #endif
 	pr_info("Data cnt: 0x%08x | Fifo cnt: 0x%08x | Int sts: 0x%08x\n",
 		readl_relaxed(msm_host->core_mem + CORE_MCI_DATA_CNT),
@@ -3050,6 +3053,7 @@ void sdhci_msm_dump_vendor_regs(struct sdhci_host *host)
 	if (host->is_crypto_en) {
 		sdhci_msm_ice_get_status(host, &sts);
 		pr_info("%s: ICE status %x\n", mmc_hostname(host->mmc), sts);
+		sdhci_msm_ice_print_regs(host);
 	}
 }
 
@@ -3844,7 +3848,17 @@ static ssize_t t_flash_detect_show(struct device *dev,
 #endif
 }
 
+static ssize_t sd_detect_cnt_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sdhci_msm_host *msm_host = dev_get_drvdata(dev);
+
+	dev_info(dev, "%s : CD count is = %u\n", __func__, msm_host->mmc->card_detect_cnt);
+	return sprintf(buf, "%u", msm_host->mmc->card_detect_cnt);
+}
+
 static DEVICE_ATTR(status, 0444, t_flash_detect_show, NULL);
+static DEVICE_ATTR(cd_cnt, 0444, sd_detect_cnt_show, NULL);
 
 static int sdhci_msm_probe(struct platform_device *pdev)
 {
@@ -3923,8 +3937,10 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 			goto pltfm_free;
 		}
 
-		if (ret <= 2)
+		if (ret <= 2) {
 			sdhci_slot[ret-1] = msm_host;
+			host->slot_no = ret;
+		}
 
 		msm_host->pdata = sdhci_msm_populate_pdata(&pdev->dev,
 							   msm_host);
@@ -4232,6 +4248,11 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 					&dev_attr_status) < 0)
 			pr_err("%s : Failed to create device file(%s)!\n",
 					__func__, dev_attr_status.attr.name);
+
+		if (device_create_file(t_flash_detect_dev,
+					&dev_attr_cd_cnt) < 0)
+			pr_err("%s : Failed to create device file(%s)!\n",
+					__func__, dev_attr_cd_cnt.attr.name);
 
 		dev_set_drvdata(t_flash_detect_dev, msm_host);
 	}

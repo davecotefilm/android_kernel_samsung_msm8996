@@ -62,6 +62,13 @@ config UPDATE_BATTERY_DATA
 	help
 	 Say Y to include support for step charging
 
+config SAMSUNG_BATTERY_ENG_TEST
+	tristate "set test mode in eng build"
+	default n
+	depends on BATTERY_SAMSUNG
+	help
+	 Say Y to set test mode in eng build
+
 # Fuel Gauge
 config FUELGAUGE_RT5033
 	tristate "RT5033 fuel gauge driver"
@@ -504,6 +511,22 @@ config CHARGER_SM5703
 	 This driver source code implemented
 	 all functions for SM5703 charger.
 
+config CHARGER_SM5703_SOFT_START_CHARGING
+	bool "SM5703 soft step charging"
+	default n
+	depends on CHARGER_SM5703
+	help
+	  Say Y here to enable support for SM5703 soft step charging
+	  You have to define CHARGER_SM5703
+
+config CHARGER_SM5703_DUALPATH
+	bool "SM5703 dual path"
+	default n
+	depends on CHARGER_SM5703
+	help
+	  Say Y here to enable support for SM5703 dual path setting for removable battery models in S/W
+	  You have to define CHARGER_SM5703
+
 config CHARGER_DA9155
 	tristate "DA9155 charger driver"
 	default n
@@ -628,3 +651,9 @@ config BATTERY_AGE_FORECAST
 	depends on BATTERY_SWELLING
 	help
 	  Say Y to use calc time to full function.
+
+config BATTERY_NOTIFIER
+	bool "battery notifier"
+	default n
+	help
+	  Say Y to enable battery notifier

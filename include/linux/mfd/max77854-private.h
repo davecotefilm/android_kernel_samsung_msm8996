@@ -112,6 +112,7 @@ enum max77854_fuelgauge_reg {
 	ICHGTERM_REG                                 = 0x1E,
 	REMCAP_AV_REG                                = 0x1F,
 	FULLCAP_NOM_REG                              = 0x23,
+	FILTER_CFG_REG                               = 0x29,
 	MISCCFG_REG                                  = 0x2B,
 	VEMPTY_REG                                   = 0x3A,
 	QRTABLE20_REG                                = 0x32,

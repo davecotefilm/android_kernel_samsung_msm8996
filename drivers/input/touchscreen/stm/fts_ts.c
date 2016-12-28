@@ -366,6 +366,13 @@ static int fts_write_reg(struct fts_ts_info *info,
 		goto exit;
 	}
 
+#if defined(CONFIG_SECURE_TOUCH)
+	if (atomic_read(&info->st_enabled)) {
+		dev_err(&info->client->dev, "%s: secure enabled\n", __func__);
+		goto exit;
+	}
+#endif
+
 	mutex_lock(&info->i2c_mutex);
 
 	xfer_msg[0].addr = client->addr;
@@ -397,6 +404,14 @@ static int fts_read_reg(struct fts_ts_info *info, unsigned char *reg, int cnum,
 		dev_err(&info->client->dev, "%s: Sensor stopped\n", __func__);
 		goto exit;
 	}
+
+#if defined(CONFIG_SECURE_TOUCH)
+	if (atomic_read(&info->st_enabled)) {
+		dev_err(&info->client->dev, "%s: secure enabled\n", __func__);
+		goto exit;
+	}
+#endif
+
 	mutex_lock(&info->i2c_mutex);
 
 	xfer_msg[0].addr = client->addr;
@@ -445,6 +460,13 @@ static int fts_read_from_string(struct fts_ts_info *info,
 		return 0;
 	}
 
+#if defined(CONFIG_SECURE_TOUCH)
+	if (atomic_read(&info->st_enabled)) {
+		dev_err(&info->client->dev, "%s: secure enabled\n", __func__);
+		return 0;
+	}
+#endif
+
 	string_reg[0] = 0xD0;
 	string_reg[1] = (*reg >> 8) & 0xFF;
 	string_reg[2] = *reg & 0xFF;
@@ -485,6 +507,13 @@ static int fts_write_to_string(struct fts_ts_info *info,
 		dev_err(&info->client->dev, "%s: Sensor stopped\n", __func__);
 		return 0;
 	}
+
+#if defined(CONFIG_SECURE_TOUCH)
+	if (atomic_read(&info->st_enabled)) {
+		dev_err(&info->client->dev, "%s: secure enabled\n", __func__);
+		return 0;
+	}
+#endif
 
 	if (!info->dt_data->support_string_lib) {
 		dev_err(&info->client->dev, "%s: Did not support String lib\n", __func__);
@@ -910,10 +939,36 @@ static int fts_get_version_info(struct fts_ts_info *info)
 		}
 	}
 
+#ifdef FTS_SUPPORT_PARTIAL_DOWNLOAD
+	regAdd[0] = 0xd0;
+	regAdd[1] = 0x00;
+	regAdd[2] = 0x5A;
+	if (info->stm_ver == STM_VER7)
+		regAdd[2] = 0x52;
+
+	ret = fts_read_reg(info, regAdd, 3, (unsigned char *)data, 3);
+	if (!ret) {
+		info->afe_ver = 0;
+		tsp_debug_info(true, info->dev,
+			"%s: Read Fail - Final AFE [Data : %2X] AFE Ver [Data : %2X] \n",
+			__func__, data[1], data[2]);
+	} else {
+		tsp_debug_info(true, info->dev,
+			"%s: Final AFE [Data : %2X] AFE Ver [Data : %2X] \n",
+			__func__, data[1], data[2]);
+		info->afe_ver = data[2];
+	}
+	tsp_debug_info(true, &info->client->dev,
+		"%s: ID: 0x%02X, Firmware: 0x%04X, Config: 0x%04X, Main: 0x%04X, AFE: 0x%02X\n",
+		__func__, info->ic_product_id, info->fw_version_of_ic,
+		info->config_version_of_ic, info->fw_main_version_of_ic,
+		info->afe_ver);
+#else
 	dev_info(&info->client->dev,
 			"%s: ID: 0x%02X, Firmware: 0x%04X, Config: 0x%04X, Main: 0x%04X\n",
 			__func__, info->ic_product_id, info->fw_version_of_ic,
 			info->config_version_of_ic, info->fw_main_version_of_ic);
+#endif
 
 	return ret;
 }
@@ -1093,7 +1148,6 @@ static int fts_init(struct fts_ts_info *info)
 	unsigned char val[16] = {0, };
 	unsigned char regAdd[8];
 	int ret;
-	int retry = 0;
 
 	fts_systemreset(info);
 
@@ -1113,14 +1167,6 @@ static int fts_init(struct fts_ts_info *info)
 	}
 
 	fts_get_version_info(info);
-
-	/* get_tsp_test_result to backup after fw_update */
-	if (info->stm_ver == STM_VER7) {
-		do {
-			ret = fts_get_tsp_test_result(info);
-			retry++;
-		} while ((ret < 0) && (retry < 5));
-	}
 
 	ret = fts_fw_update_on_probe(info);
 	if (ret < 0)
@@ -1780,12 +1826,12 @@ static unsigned char fts_event_handler_type_b(struct fts_ts_info *info,
 #endif
 		else if (EventID == EVENTID_LEAVE_POINTER) {
 			dev_err(&info->client->dev,
-				"[R] tID:%d mc: %d tc:%d lx:%d ly:%d Ver[%02X%04X%01X%01X%01X] NV[%X]\n",
+				"[R] tID:%d mc: %d tc:%d lx:%d ly:%d Ver[%02X%04X%01X%01X%01X] NV[%X|%d]\n",
 				TouchID, info->finger[TouchID].mcount, info->touch_count,
 				info->finger[TouchID].lx, info->finger[TouchID].ly,
 				info->panel_revision, info->fw_main_version_of_ic,
 				info->flip_enable, info->glove_enabled, info->mainscr_disable,
-				info->test_result.data[0]);
+				info->test_result.data[0], info->pat);
 			info->finger[TouchID].mcount = 0;
 		}
 
@@ -1803,14 +1849,14 @@ static unsigned char fts_event_handler_type_b(struct fts_ts_info *info,
 #endif
 		else if (EventID == EVENTID_LEAVE_POINTER) {
 			dev_err(&info->client->dev,
-				"[R] tID:%d loc:%c%c mc: %d tc:%d Ver[%02X%04X%01X%01X%01X] NV[%X]\n",
+				"[R] tID:%d loc:%c%c mc: %d tc:%d Ver[%02X%04X%01X%01X%01X] NV[%X|%d]\n",
 				TouchID,
 				location_detect(info, info->finger[TouchID].ly, 1),
 				location_detect(info, info->finger[TouchID].lx, 0),
 				info->finger[TouchID].mcount, info->touch_count,
 				info->panel_revision, info->fw_main_version_of_ic,
 				info->flip_enable, info->glove_enabled, info->mainscr_disable,
-				info->test_result.data[0]);
+				info->test_result.data[0], info->pat);
 			info->finger[TouchID].mcount = 0;
 		}
 #endif
@@ -2371,6 +2417,22 @@ static void fts_request_gpio(struct fts_ts_info *info)
 #endif
 }
 
+static void fts_read_nv_work(struct work_struct *work)
+{
+	struct fts_ts_info *info = container_of(work, struct fts_ts_info,
+							work_read_nv.work);
+
+	if (info->stm_ver == STM_VER7)
+		fts_get_tsp_test_result(info);
+
+#ifdef FTS_SUPPORT_PARTIAL_DOWNLOAD
+	get_PureAutotune_status(info);
+#endif
+
+	tsp_debug_info(true, &info->client->dev,
+		"%s: fac_nv:%02X, pat:%d\n", __func__, info->test_result.data[0], info->pat);
+}
+
 static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 {
 	int retval;
@@ -2445,6 +2507,7 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 #if defined(USE_RESET_WORK_EXIT_LOWPOWERMODE) || defined(FTS_SUPPORT_ESD_CHECK)
 	INIT_DELAYED_WORK(&info->reset_work, fts_reset_work);
 #endif
+	INIT_DELAYED_WORK(&info->work_read_nv, fts_read_nv_work);
 
 	fts_request_gpio(info);
 	retval = fts_pinctrl_init(info);
@@ -2720,6 +2783,8 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 #endif
 
 	tsp_init_done = true;
+
+	schedule_delayed_work(&info->work_read_nv, msecs_to_jiffies(100));
 
 	dev_err(&info->client->dev, "%s done\n", __func__);
 

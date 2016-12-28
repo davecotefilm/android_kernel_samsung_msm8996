@@ -340,6 +340,10 @@ extern void muic_register_max77849_regmap_desc(struct regmap_desc **pdesc);
 extern void muic_register_max77854_regmap_desc(struct regmap_desc **pdesc);
 #endif
 
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+extern void muic_register_sm5703_regmap_desc(struct regmap_desc **pdesc);
+#endif
+
 static struct vendor_regmap vendor_regmap_tbl[] = {
 #if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
 	{"sm,sm5703", muic_register_sm5703_regmap_desc},
@@ -352,6 +356,9 @@ static struct vendor_regmap vendor_regmap_tbl[] = {
 #endif
 #if defined(CONFIG_MUIC_UNIVERSAL_MAX77854)
 	{"max,max77854", muic_register_max77854_regmap_desc},
+#endif
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5703)
+	{"sm,sm5703", muic_register_sm5703_regmap_desc},
 #endif
 	{"", NULL},
 };

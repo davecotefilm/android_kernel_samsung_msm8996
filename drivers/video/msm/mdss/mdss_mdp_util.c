@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -158,7 +158,7 @@ irqreturn_t mdss_mdp_isr(int irq, void *ptr)
 	struct mdss_data_type *mdata = ptr;
 	u32 isr, mask, hist_isr, hist_mask;
 
-	if(!mdata->clk_ena)
+	if (!mdata->clk_ena)
 		return IRQ_HANDLED;
 
 	isr = readl_relaxed(mdata->mdp_base + MDSS_MDP_REG_INTR_STATUS);
@@ -248,14 +248,6 @@ irqreturn_t mdss_mdp_isr(int irq, void *ptr)
 		MDSS_MDP_INTR_WB_2_DONE >> 2 : MDSS_MDP_INTR_WB_2_DONE)) {
 		mdss_mdp_intr_done(MDP_INTR_WB_2);
 		mdss_misr_crc_collect(mdata, DISPLAY_MISR_MDP);
-	}
-
-	if (isr & MDSS_MDP_INTR_PING_PONG_0_AUTOREFRESH_DONE) {
-		mdss_mdp_intr_done(MDP_INTR_PING_PONG_0_AUTO_REF);
-	}
-
-	if (isr & MDSS_MDP_INTR_PING_PONG_1_AUTOREFRESH_DONE) {
-		mdss_mdp_intr_done(MDP_INTR_PING_PONG_1_AUTO_REF);
 	}
 
 	if (isr & MDSS_MDP_INTR_PING_PONG_0_AUTOREFRESH_DONE)

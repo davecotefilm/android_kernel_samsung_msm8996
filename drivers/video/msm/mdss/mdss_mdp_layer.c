@@ -752,12 +752,14 @@ static struct sync_fence *__create_fence(struct msm_fb_data_type *mfd,
 	if (*fence_fd < 0) {
 		pr_err("%s: get_unused_fd_flags failed error:0x%x\n",
 			fence_name, *fence_fd);
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+		sync_dump();
+#endif
 		sync_fence_put(sync_fence);
 		sync_fence = NULL;
 		goto end;
 	}
 
-	sync_fence_install(sync_fence, *fence_fd);
 end:
 	return sync_fence;
 }
@@ -830,6 +832,9 @@ static int __handle_buffer_fences(struct msm_fb_data_type *mfd,
 		ret = PTR_ERR(retire_fence);
 		goto retire_fence_err;
 	}
+
+	sync_fence_install(release_fence, commit->release_fence);
+	sync_fence_install(retire_fence, commit->retire_fence);
 
 	mutex_unlock(&sync_pt_data->sync_mutex);
 	return ret;
@@ -1191,7 +1196,7 @@ static int __validate_layers(struct msm_fb_data_type *mfd,
 
 	struct mdss_mdp_mixer *mixer = NULL;
 	struct mdp_input_layer *layer, *prev_layer, *layer_list;
-	bool is_single_layer = false;
+	bool is_single_layer = false, force_validate;
 	enum layer_pipe_q pipe_q_type;
 
 	ret = mutex_lock_interruptible(&mdp5_data->ov_lock);
@@ -1215,6 +1220,15 @@ static int __validate_layers(struct msm_fb_data_type *mfd,
 		}
 		inputndx |= layer_list[i].pipe_ndx;
 	}
+
+	/*
+	 * Force all layers to go through full validation after
+	 * dynamic resolution switch, immaterial of the configs in
+	 * the layer.
+	 */
+	mutex_lock(&mfd->switch_lock);
+	force_validate = (mfd->switch_state != MDSS_MDP_NO_UPDATE_REQUESTED);
+	mutex_unlock(&mfd->switch_lock);
 
 	for (i = 0; i < layer_count; i++) {
 		layer = &layer_list[i];
@@ -1263,7 +1277,9 @@ static int __validate_layers(struct msm_fb_data_type *mfd,
 		 * are same. validation can be skipped if only buffer handle
 		 * is changed.
 		 */
-		pipe = __find_layer_in_validate_q(layer, mdp5_data);
+		pipe = (force_validate) ? NULL :
+				__find_layer_in_validate_q(layer, mdp5_data);
+
 		if (pipe) {
 			if (mixer_mux == MDSS_MDP_MIXER_MUX_RIGHT)
 				right_plist[right_cnt++] = pipe;
@@ -1362,6 +1378,11 @@ static int __validate_layers(struct msm_fb_data_type *mfd,
 		pr_debug("id:0x%x flags:0x%x dst_x:%d\n",
 			layer->pipe_ndx, layer->flags, layer->dst_rect.x);
 		layer->z_order -= MDSS_MDP_STAGE_0;
+		MDSS_XLOG(mfd->force_revalidate, pipe->ndx, pipe->mixer_stage,
+				pipe->src_split_req, pipe->is_right_blend);
+		MDSS_XLOG(pipe->src.x, pipe->src.y, pipe->src.w, pipe->src.h,
+				pipe->dst.x, pipe->dst.y, pipe->dst.w,
+				pipe->dst.h);
 	}
 
 	ret = mdss_mdp_perf_bw_check(mdp5_data->ctl, left_plist, left_cnt,
@@ -1376,6 +1397,7 @@ static int __validate_layers(struct msm_fb_data_type *mfd,
 	ret = __validate_secure_display(mdp5_data);
 
 validate_exit:
+	mfd->force_revalidate = false;
 	pr_debug("err=%d total_layer:%d left:%d right:%d release_ndx=0x%x destroy_ndx=0x%x processed=%d\n",
 		ret, layer_count, left_lm_layers, right_lm_layers,
 		release_ndx, destroy_ndx, i);

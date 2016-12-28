@@ -26,6 +26,11 @@
 #define WCD_MONO_HS_MIN_THR	2
 #define WCD_MBHC_STRINGIFY(s)  __stringify(s)
 
+enum {
+	WCD_MBHC_ELEC_HS_INS,
+	WCD_MBHC_ELEC_HS_REM,
+};
+
 struct wcd_mbhc;
 enum wcd_mbhc_register_function {
 	WCD_MBHC_L_DET_EN,
@@ -59,6 +64,7 @@ enum wcd_mbhc_register_function {
 	WCD_MBHC_SWCH_LEVEL_REMOVE,
 	WCD_MBHC_MOISTURE_VREF,
 	WCD_MBHC_PULLDOWN_CTRL,
+	WCD_MBHC_NOISE_FILT_CTRL, /* Noise filter type control */
 	WCD_MBHC_REG_FUNC_MAX,
 };
 
@@ -376,10 +382,12 @@ struct wcd_mbhc {
 	bool in_swch_irq_handler;
 	bool hphl_swh; /*track HPHL switch NC / NO */
 	bool gnd_swh; /*track GND switch NC / NO */
+	bool gnd_cfilt; /* noise filter type status */
 	u8 micbias1_cap_mode; /* track ext cap setting */
 	u8 micbias2_cap_mode; /* track ext cap setting */
 	bool hs_detect_work_stop;
 	bool micbias_enable;
+	bool pullup_enable;
 	bool btn_press_intr;
 	bool is_hs_recording;
 	bool is_extn_cable;
@@ -420,6 +428,7 @@ struct wcd_mbhc {
 	struct mutex hphr_pa_lock;
 
 	struct completion btn_press_compl;
+	unsigned long intr_status;
 #if defined(CONFIG_SND_SOC_WCD_MBHC_ADC)
 	int debounce_time_ms;
 	int mpp_ch_scale[3];
@@ -494,6 +503,7 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 		      bool impedance_det_en);
 int wcd_mbhc_get_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
 			   uint32_t *zr);
+void wcd_mbhc_deinit(struct wcd_mbhc *mbhc);
 #else
 static inline void wcd_mbhc_stop(struct wcd_mbhc *mbhc)
 {
@@ -521,6 +531,8 @@ static inline int wcd_mbhc_get_impedance(struct wcd_mbhc *mbhc,
 	*zr = 0;
 	return -EINVAL;
 }
+static inline void wcd_mbhc_deinit(struct wcd_mbhc *mbhc)
+{
+}
 #endif
-void wcd_mbhc_deinit(struct wcd_mbhc *mbhc);
 #endif /* __WCD_MBHC_V2_H__ */

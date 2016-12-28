@@ -27,6 +27,8 @@
 #define HSUSB_GADGET_VBUS_DRAW_UNITS 2
 #include "multi_config.h"
 
+#include <linux/usb_notify.h>
+
 static bool enable_l1_for_hs;
 module_param(enable_l1_for_hs, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(enable_l1_for_hs, "Enable support for L1 LPM for HS devices");
@@ -689,7 +691,11 @@ static int bos_desc(struct usb_composite_dev *cdev)
 	usb_ext->bLength = USB_DT_USB_EXT_CAP_SIZE;
 	usb_ext->bDescriptorType = USB_DT_DEVICE_CAPABILITY;
 	usb_ext->bDevCapabilityType = USB_CAP_TYPE_EXT;
+#ifdef CONFIG_USB_SAMSUNG_ENHANCED_SS
+	usb_ext->bmAttributes = 0;
+#else
 	usb_ext->bmAttributes = cpu_to_le32(USB_LPM_SUPPORT);
+#endif
 
 	if (gadget_is_superspeed(cdev->gadget)) {
 		/*
@@ -1687,7 +1693,11 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 				cdev->gadget->ep0->maxpacket;
 			if (gadget_is_superspeed(gadget)) {
 				if (gadget->speed >= USB_SPEED_SUPER) {
+#ifdef CONFIG_USB_SAMSUNG_ENHANCED_SS
+					cdev->desc.bcdUSB = cpu_to_le16(0x0310);
+#else
 					cdev->desc.bcdUSB = cpu_to_le16(0x0300);
+#endif
 					cdev->desc.bMaxPacketSize0 = 9;
 				} else if (gadget->l1_supported ||
 						enable_l1_for_hs) {
@@ -1695,12 +1705,22 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 					DBG(cdev,
 					"Config HS device with LPM(L1)\n");
 				} else {
+#ifdef CONFIG_USB_SAMSUNG_ENHANCED_SS
+					cdev->desc.bcdUSB = cpu_to_le16(0x0210);
+#else
 					cdev->desc.bcdUSB = cpu_to_le16(0x0200);
+#endif
 				}
 			} else if (gadget->l1_supported) {
 				cdev->desc.bcdUSB = cpu_to_le16(0x0210);
 				DBG(cdev, "Config HS device with LPM(L1)\n");
 			}
+
+			if(cdev->desc.bcdUSB == cpu_to_le16(0x0310) ||
+				cdev->desc.bcdUSB == cpu_to_le16(0x0300))
+				store_usblog_notify(NOTIFY_USBSTATE, "SPEED=SPSS", NULL);	
+			else
+				store_usblog_notify(NOTIFY_USBSTATE, "SPEED=HIGH", NULL);			
 
 			value = min(w_length, (u16) sizeof cdev->desc);
 			memcpy(req->buf, &cdev->desc, value);
@@ -1737,9 +1757,14 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 				value = min(w_length, (u16) value);
 			break;
 		case USB_DT_BOS:
-			if ((gadget_is_superspeed(gadget) &&
-				(gadget->speed >= USB_SPEED_SUPER))
+#ifdef CONFIG_USB_SAMSUNG_ENHANCED_SS
+			if (gadget_is_superspeed(gadget) 
 				 || gadget->l1_supported) {
+#else
+			if ((gadget_is_superspeed(gadget) 
+				&&(gadget->speed >= USB_SPEED_SUPER))
+				 || gadget->l1_supported) {
+#endif				 
 				value = bos_desc(cdev);
 				value = min(w_length, (u16) value);
 			}
@@ -1760,6 +1785,8 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 				VDBG(cdev, "HNP inactive\n");
 		}
 		spin_lock(&cdev->lock);
+		value = set_config(cdev, ctrl, w_value);
+		spin_unlock(&cdev->lock);
 		printk(KERN_DEBUG "usb:: SET_CON\n");
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 		/* USB3.0 ch9 set configuration test issue for multi-config */
@@ -1767,8 +1794,6 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			if (w_value)
 				set_config_number(w_value -1);
 #endif
-		value = set_config(cdev, ctrl, w_value);
-		spin_unlock(&cdev->lock);
 		break;
 	case USB_REQ_GET_CONFIGURATION:
 		if (ctrl->bRequestType != USB_DIR_IN)

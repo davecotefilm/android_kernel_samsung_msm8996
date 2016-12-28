@@ -1872,6 +1872,25 @@ static bool msm_vfe46_is_module_cfg_lock_needed(
 	return false;
 }
 
+static int msm_vfe46_get_mmu_handles(struct vfe_device *vfe_dev)
+{
+	int rc = 0;
+
+	rc = cam_smmu_get_handle("vfe", &vfe_dev->buf_mgr->ns_iommu_hdl);
+	if (rc < 0) {
+		pr_err("%s: err: vfe get handle failed\n", __func__);
+		return -EINVAL;
+	}
+
+	vfe_dev->buf_mgr->sec_iommu_hdl = vfe_dev->buf_mgr->ns_iommu_hdl;
+	return 0;
+}
+
+static void msm_vfe46_put_mmu_handles(struct vfe_device *vfe_dev)
+{
+	cam_smmu_destroy_handle(vfe_dev->buf_mgr->ns_iommu_hdl);
+}
+
 static void msm_vfe46_stats_enable_module(struct vfe_device *vfe_dev,
 	uint32_t stats_mask, uint8_t enable)
 {
@@ -2130,6 +2149,8 @@ struct msm_vfe_hardware_info vfe46_hw_info = {
 			.process_error_status = msm_vfe46_process_error_status,
 			.is_module_cfg_lock_needed =
 				msm_vfe46_is_module_cfg_lock_needed,
+			.get_mmu_handles = msm_vfe46_get_mmu_handles,
+			.put_mmu_handles = msm_vfe46_put_mmu_handles,
 		},
 		.stats_ops = {
 			.get_stats_idx = msm_vfe46_get_stats_idx,

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -239,6 +239,13 @@ struct ipa_ep_cfg_mode {
  *			aggregation closure. Valid for Output Pipes only (IPA
  *			Producer). EOF affects only Pipes configured for
  *			generic aggregation.
+ * @aggr_sw_eof_active: 0: EOF does not close aggregation. HW closes aggregation
+ *			(sends EOT) only based on its aggregation config
+ *			(byte/time limit, etc).
+ *			1: EOF closes aggregation in addition to HW based
+ *			aggregation closure. Valid for Output Pipes only (IPA
+ *			Producer). EOF affects only Pipes configured for generic
+ *			aggregation.
  */
 struct ipa_ep_cfg_aggr {
 	enum ipa_aggr_en_type aggr_en;
@@ -246,6 +253,7 @@ struct ipa_ep_cfg_aggr {
 	u32 aggr_byte_limit;
 	u32 aggr_time_limit;
 	u32 aggr_pkt_limit;
+	bool aggr_sw_eof_active;
 };
 
 /**
@@ -1462,6 +1470,10 @@ int ipa_uc_wdi_get_dbpa(struct ipa_wdi_db_params *out);
  * if uC not ready only, register callback
  */
 int ipa_uc_reg_rdyCB(struct ipa_wdi_uc_ready_params *param);
+/*
+ * To de-register uC ready callback
+ */
+int ipa_uc_dereg_rdyCB(void);
 
 int ipa_create_wdi_mapping(u32 num_buffers, struct ipa_wdi_buffer_info *info);
 int ipa_release_wdi_mapping(u32 num_buffers, struct ipa_wdi_buffer_info *info);
@@ -2135,6 +2147,11 @@ static inline int ipa_uc_wdi_get_dbpa(
 
 static inline int ipa_uc_reg_rdyCB(
 	struct ipa_wdi_uc_ready_params *param)
+{
+	return -EPERM;
+}
+
+static inline int ipa_uc_dereg_rdyCB(void)
 {
 	return -EPERM;
 }

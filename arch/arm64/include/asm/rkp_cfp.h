@@ -45,18 +45,17 @@ lr	.req	x30		// link register
 	#error "Need to keep thread_info offsetof(rrk) in sync with TI_RRK_AGAIN (cannot include asm-offsets due to conflicts"
 #endif
 
-
 #ifdef CONFIG_RKP_CFP_ROPP_HYPKEY
-	.macro _smc, imm 
-	stp RRX, RRS, [sp, #-16]!
-	dsb sy
+	.macro	_smc, imm
+	stp	RRX, RRS, [sp, #-16]!
+	dsb	sy
 	isb
-	smc \imm
-	dsb sy
+	smc	\imm
+	dsb	sy
 	isb
 	// get_thread_info RRK
-	mov	 RRX, sp
-	and	RRX,  RRX, #~(THREAD_SIZE - 1) 	// top of stack
+	mov	RRX, sp
+	and	RRX, RRX, #~(THREAD_SIZE - 1) // top of stack
 	// load_key from hypervisor
 	stp	x0, x1, [sp, #-16]!
 	mov	x0, #0x3000
@@ -65,24 +64,22 @@ lr	.req	x30		// link register
 	add	x1, x1, #TI_RRK_AGAIN
 	hvc	#0
 	ldp	x0, x1, [sp], #16
-	
-	/*load RRX and RRS*/
-	ldp RRX, RRS, [sp], #16
+	ldp	RRX, RRS, [sp], #16
 	.endm
 #else //CONFIG_RKP_CFP_ROPP_HYPKEY
-	.macro _smc, imm 
-	stp RRX, RRS, [sp, #-16]!
-	dsb sy
+	.macro	_smc, imm
+	stp	RRX, RRS, [sp, #-16]!
+	dsb	sy
 	isb
-	smc \imm
-	dsb sy
+	smc	\imm
+	dsb	sy
 	isb
 	// get_thread_info RRK
-	mov	 RRX, sp
-	and	RRX,  RRX, #~(THREAD_SIZE - 1) 	// top of stack
+	mov	RRX, sp
+	and	RRX, RRX, #~(THREAD_SIZE - 1) // top of stack
 	// load_key RRK
-	ldr RRK, [RRX, #TI_RRK_AGAIN]
-	ldp RRX, RRS, [sp], #16
+	ldr	RRK, [RRX, #TI_RRK_AGAIN]
+	ldp	RRX, RRS, [sp], #16
 	.endm
 #endif //CONFIG_RKP_CFP_ROPP_HYPKEY
 
